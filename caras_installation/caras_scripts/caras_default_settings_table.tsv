@@ -1,0 +1,22 @@
+program	argument
+fastqc1	-q
+clumpify	dedupe spany addcount qout=33 fixjunk
+bbduk	ktrim=r k=21 mink=8 hdist=2 hdist2=1
+trimmomatic	LEADING:20 SLIDINGWINDOW:4:20 TRAILING:20 MINLEN:20
+fastqc2	-q
+bwa_mem	
+samtools_view	-q 20
+plotfingerprint	
+reads_normalizer	--norm properly_paired
+fastqc3	-q
+macs2_callpeak	
+gem	-Xmx10G --k_min 8 --k_max 12
+sicer2	-w 50 -g 100
+homer_findPeaks	-region
+genrich	-v
+seacr	
+homer_mergePeaks	
+homer_annotatePeaks	
+fold_change_calculator	--normfactor user_value --chip_norm 1 --ctrl_norm 1
+homer_findMotifsGenome	-size given -mask
+meme_chip	-meme-nmotifs 25
