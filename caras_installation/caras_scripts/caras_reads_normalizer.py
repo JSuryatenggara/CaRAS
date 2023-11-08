@@ -19,40 +19,40 @@ subprocess.run('ulimit -s 65536', shell = True)
 
 
 
-def normalized_bam_generator(arg_1, arg_2):
+# def normalized_bam_generator(arg_1, arg_2):
 
-    with open('{}/{}_{}.normalized.sam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter], arg_1), 'w') as normalized_sam_file:
-        normalized_sam_file = csv.writer(normalized_sam_file, delimiter = '\t')
-        normalized_sam_file.writerows(sam_header_array)
+#     with open('{}/{}_{}.normalized.sam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter], arg_1), 'w') as normalized_sam_file:
+#         normalized_sam_file = csv.writer(normalized_sam_file, delimiter = '\t')
+#         normalized_sam_file.writerows(sam_header_array)
 
-        for normalized_sam_body_list in arg_2:
-            normalized_sam_file.writerows(normalized_sam_body_list)
+#         for normalized_sam_body_list in arg_2:
+#             normalized_sam_file.writerows(normalized_sam_body_list)
 
-    subprocess.run('samtools view -h -bS {}/{}_{}.normalized.sam > {}/{}_{}.normalized.bam'.format(
-        bam_file_dir_list[bam_file_counter],
-        bam_file_name_list[bam_file_counter],
-        arg_1,
-        bam_file_dir_list[bam_file_counter],
-        bam_file_name_list[bam_file_counter],
-        arg_1),
-        shell = True)
+#     subprocess.run('samtools view -h -bS {}/{}_{}.normalized.sam > {}/{}_{}.normalized.bam'.format(
+#         bam_file_dir_list[bam_file_counter],
+#         bam_file_name_list[bam_file_counter],
+#         arg_1,
+#         bam_file_dir_list[bam_file_counter],
+#         bam_file_name_list[bam_file_counter],
+#         arg_1),
+#         shell = True)
 
-    subprocess.run('rm -r -f {}/{}_{}.normalized.sam'.format(
-        bam_file_dir_list[bam_file_counter],
-        bam_file_name_list[bam_file_counter],
-        arg_1),
-        shell = True)
+#     subprocess.run('rm -r -f {}/{}_{}.normalized.sam'.format(
+#         bam_file_dir_list[bam_file_counter],
+#         bam_file_name_list[bam_file_counter],
+#         arg_1),
+#         shell = True)
 
     # print('Normalized partial bam file is saved as {}/{}_{}.normalized.bam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter], arg_1))
 
 
 
-def sam_numerator(sam_array_row):
-    normalized_sam_list = []
-    for counter in range(int(sam_array_row[0])):
-        normalized_sam_list.append(sam_array_row[1])
+# def sam_numerator(sam_array_row):
+#     normalized_sam_list = []
+#     for counter in range(int(sam_array_row[0])):
+#         normalized_sam_list.append(sam_array_row[1])
 
-    return normalized_sam_list
+#     return normalized_sam_list
 
 
 
@@ -143,8 +143,6 @@ if args.norm_bam:
         print('Number of bam files need to be the same as normalizer bam files. Exiting program')
         exit()
 
-# bdg_file = os.path.abspath(args.bdg)
-
 if args.log_dir:
     log_dir = args.log_dir
 
@@ -161,9 +159,7 @@ bdg_bin_size = args.bin
 
 ###=====================================================================================================================
 
-print(norm_mode)
-print(len(bam_file_list))
-print(args.norm_bam)
+
 
 if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam:
 
@@ -191,18 +187,25 @@ if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam:
 
         norm_read_count_list.append(norm_read_count)
 
+        current_sample_name = norm_bam_file_list[bam_file_counter].split('/')[-1].rstrip('.normmapped.bam')
+
+        print('{} reads are {} to normalizer (spiked-in DNA / carry-over DNA) genome in sample {}'.format(norm_read_count, norm_mode, current_sample_name))
 
 
-    norm_read_count_max = np.max(norm_read_count_list)
-    norm_read_count_list_max_removed = [norm_read_count for norm_read_count in norm_read_count_list]
-    norm_read_count_list_max_removed.remove(norm_read_count_max)
-    norm_read_count_second_max = np.max(norm_read_count_list_max_removed)
 
+    norm_read_count_max = np.unique(norm_read_count_list)[-1]
+    try:
+        norm_read_count_second_max = np.max()[-2]
+    except:
+        norm_read_count_second_max = norm_read_count_max
 
 
     if norm_scale_numerator == 0: # norm_scale_numerator = 0 is default mode (automatic), where the script will determine the numerator value based on mapped carry over DNA fragments.
-        norm_scale_multiplier = int(1 / ((norm_read_count_max / norm_read_count_second_max) - 1))
-
+        if norm_read_count_second_max != norm_read_count_max:
+            norm_scale_multiplier = round(1 / ((norm_read_count_max / norm_read_count_second_max) - 1))
+        else:
+            norm_scale_multiplier = 1
+            
         if norm_scale_multiplier > 10:
             norm_scale_multiplier = 10
             
@@ -238,10 +241,10 @@ else:
 
 
 
-print('bam_file_name: {}'.format(bam_file_name_list))
-print('norm_scale_numerator: {}'.format(norm_scale_numerator))
-print('norm_read_count: {}'.format(norm_read_count_list))
-print('norm_scale_factor: {}'.format(norm_scale_factor_list))
+print('bam_file_names: \n{}'.format(bam_file_name_list))
+print('norm_scale_numerators: \n{}'.format(norm_scale_numerator))
+print('norm_read_counts: \n{}'.format(norm_read_count_list))
+print('norm_scale_factors: \n{}'.format(norm_scale_factor_list))
 
 
 
@@ -255,6 +258,8 @@ with open('{}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string), '
     for bam_file_counter in range(len(bam_file_list)):
         scaling_numbers_file.writerow([bam_file_name_list[bam_file_counter], norm_scale_numerator, norm_read_count_list[bam_file_counter], norm_scale_factor_list[bam_file_counter]])
 
+print('Scaling factors for all samples are recorded in: {}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string))
+
 
 
 ###=====================================================================================================================
@@ -263,7 +268,11 @@ with open('{}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string), '
 
 for bam_file_counter in range(len(bam_file_list)): 
 
+    print('Processing bam file: {}'.format(bam_file_name_list[bam_file_counter]))
+
     if args.make_bdg:
+
+        print('Generating normalized bedgraph file with normalization scaling factor of {}'.format(norm_scale_factor_list[bam_file_counter]))
 
         if args.log_dir:
             bedgraph_log_string = '1> {}/{}.bedGraphing.out 2> {}/{}.bedGraphing.err'.format(log_dir, bam_file_name_list[bam_file_counter], log_dir, bam_file_name_list[bam_file_counter])
@@ -271,7 +280,7 @@ for bam_file_counter in range(len(bam_file_list)):
             bedgraph_log_string = ''
 
         # Running bamCoverage to generate a bedgraph file, to be used later as input for SEACR
-        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.bdg --skipNAs -of bedgraph --binSize {} --scaleFactor {} {}\n\n'.format(
+        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bdg --skipNAs -of bedgraph --binSize {} --scaleFactor {} {}\n\n'.format(
             cpu_count, 
             bam_file_list[bam_file_counter],
             bam_file_dir_list[bam_file_counter],
@@ -281,10 +290,12 @@ for bam_file_counter in range(len(bam_file_list)):
             bedgraph_log_string),
             shell = True)
 
-        print('Bedgraph file succesfully generated: {}/{}.bdg'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
+        print('Normalized bedgraph file succesfully generated: {}/{}.normalized.bdg'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
 
 
     if args.make_bw:
+
+        print('Generating normalized bigwig file with normalization scaling factor of {}'.format(norm_scale_factor_list[bam_file_counter]))
 
         if args.log_dir:
             bigwig_log_string = '1> {}/{}.bigWiging.out 2> {}/{}.bigWiging.err'.format(log_dir, bam_file_name_list[bam_file_counter], log_dir, bam_file_name_list[bam_file_counter])
@@ -292,7 +303,7 @@ for bam_file_counter in range(len(bam_file_list)):
             bigwig_log_string = ''
 
         # Running bamCoverage to generate a bigwig file, to be used later for peak visualization
-        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.bw -of bigwig --binSize {} --scaleFactor {} {}\n\n'.format(
+        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bw -of bigwig --binSize {} --scaleFactor {} {}\n\n'.format(
             cpu_count, 
             bam_file_list[bam_file_counter],
             bam_file_dir_list[bam_file_counter],
@@ -302,128 +313,28 @@ for bam_file_counter in range(len(bam_file_list)):
             bigwig_log_string),
             shell = True)
 
-        print('Bigwig file succesfully generated: {}/{}.bw'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
+        print('Normalized bigwig file succesfully generated: {}/{}.normalized.bw'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
 
 
 
 ###=====================================================================================================================
 
 
+
     if args.make_bam:
 
-        if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam and int(norm_scale_factor_list[bam_file_counter]) > 1:
+        if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam and round(norm_scale_factor_list[bam_file_counter]) > 1:
+            
+            print('Generating normalized bam file with rounded normalization scaling factor of {}'.format(round(norm_scale_factor_list[bam_file_counter])))
 
-            popen_sam_header = subprocess.Popen('samtools view -H {}'.format(bam_file_list[bam_file_counter]), shell = True, stdout = subprocess.PIPE)
-            sam_header_out = popen_sam_header.communicate()[0]
-            sam_header_full_text = sam_header_out.decode('utf-8').strip()
-            sam_header_array = [sam_header_row.split('\t') for sam_header_row in sam_header_full_text.split('\n')]
+            current_bam_filename = bam_file_list[bam_file_counter].rstrip('.bam')
 
-            popen_sam_body = subprocess.Popen('samtools view {}'.format(bam_file_list[bam_file_counter]), shell = True, stdout = subprocess.PIPE)
-            sam_body_out = popen_sam_body.communicate()[0]
-            sam_body_full_text = sam_body_out.decode('utf-8').strip()
-            sam_body_array = [sam_body_row.split('\t') for sam_body_row in sam_body_full_text.split('\n')]
+            merge_bam_list = ['{}.bam'.format(current_bam_filename) for norm_scale_factor_counter in range(round(norm_scale_factor_list[bam_file_counter]))]
+            merge_bam_string = (' '.join(merge_bam_list))
 
-            print('Multiplying reads in .sam files based on rounded normalization factor: {}'.format(str(int(norm_scale_factor_list[bam_file_counter]))))
-            pool_sam_numerator = multiprocessing.Pool(processes = cpu_count)
-            sam_body_array = [[norm_scale_factor_list[bam_file_counter], sam_body_array_row] for sam_body_array_row in sam_body_array]
-            normalized_sam_body_array = pool_sam_numerator.map(sam_numerator, sam_body_array)
-            pool_sam_numerator.close()
-            pool_sam_numerator.join()
+            subprocess.run('samtools merge -@ {} -f -c -p {}.normalized.bam {}'.format(cpu_count, current_bam_filename, merge_bam_string), shell = True)
 
-
-
-            group_size = int(10000/math.sqrt(norm_scale_factor_list[bam_file_counter]))
-
-            output_bam_list = ['{}/{}_{}.normalized.bam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter], counter + 1) for counter in range(math.ceil(len(normalized_sam_body_array) / group_size))]
-
-            output_bam_string_list = []
-
-            output_bam_temp_file_list = []
-
-            bam_string_length = 100
-
-            for counter in range(math.ceil(len(output_bam_list) / bam_string_length)):
-                try:
-                    # output_bam_nested_list.append(output_bam_list[(counter * bam_string_length) : ((counter + 1) * bam_string_length)]) 
-                    output_bam_string_list.append(' '.join(output_bam_list[(counter * bam_string_length) : ((counter + 1) * bam_string_length)]))
-                    
-                except:
-                    # output_bam_nested_list.append(output_bam_list[(counter + bam_string_length) : ])
-                    output_bam_string_list.append(' '.join(output_bam_list[(counter + bam_string_length) : ]))
-
-                output_bam_temp_file_list.append('{}/{}_{}.tempmerged.normalized.bam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter], counter + 1))
-
-
-
-            normalized_sam_body_group_list = []
-
-            for counter in range(math.ceil(len(normalized_sam_body_array) / group_size)):
-                try:
-                    normalized_sam_body_group_list.append(normalized_sam_body_array[(counter * group_size) : ((counter + 1) * group_size)]) 
-
-                except:
-                    normalized_sam_body_group_list.append(normalized_sam_body_array[(counter + group_size) : ])
-
-
-
-            normalized_sam_body_group_nested_list = []
-
-            for counter in range(math.ceil(len(normalized_sam_body_group_list) / cpu_count)):
-                try:
-                    normalized_sam_body_group_nested_list.append(normalized_sam_body_group_list[(counter * cpu_count) : ((counter + 1) * cpu_count)]) 
-
-                except:
-                    normalized_sam_body_group_nested_list.append(normalized_sam_body_group_list[(counter + cpu_count) : ])
-
-
-
-            print('Generating normalized bam file')
-
-            group_counter = 1
-
-            for normalized_sam_body_group_list in normalized_sam_body_group_nested_list:
-
-                process_list = [multiprocessing.Process(target = normalized_bam_generator, args = ((group_counter + counter), normalized_sam_body_group_list[counter])) for counter in range(len(normalized_sam_body_group_list))]
-
-                for process in process_list:
-                    process.start()
-
-                for process in process_list:
-                    process.join()    
-
-                group_counter += len(normalized_sam_body_group_list)
-
-            for counter in range(len(output_bam_string_list)):
-                subprocess.run('samtools merge -@ {} -h {}/{}_1.normalized.bam -f -c -p {} {}'.format(
-                    cpu_count,
-                    bam_file_dir_list[bam_file_counter],
-                    bam_file_name_list[bam_file_counter],
-                    output_bam_temp_file_list[counter],
-                    output_bam_string_list[counter]),
-                    shell = True)
-
-            subprocess.run('samtools merge -@ {} -h {}/{}_1.normalized.bam -f -c -p {}/{}.normalized.bam {}'.format(
-                cpu_count,
-                bam_file_dir_list[bam_file_counter],
-                bam_file_name_list[bam_file_counter],
-                bam_file_dir_list[bam_file_counter],
-                bam_file_name_list[bam_file_counter],
-                ' '.join(output_bam_temp_file_list)),
-                shell = True)
-
-            for counter in range(len(output_bam_string_list)):
-
-                subprocess.run('rm -r -f {}'.format(
-                    output_bam_string_list[counter]),
-                    shell = True)
-
-            subprocess.run('rm -r -f {}'.format(
-                ' '.join(output_bam_temp_file_list)),
-                shell = True)
-
-            print('Normalization done. Normalized {} is saved as {}/{}.normalized.bam'.format(bam_file_list[bam_file_counter], bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
-
-
+            print('Normalization done. Normalized bam file is saved as {}.normalized.bam'.format(current_bam_filename))
 
         else:
 
@@ -433,4 +344,4 @@ for bam_file_counter in range(len(bam_file_list)):
                 bam_file_name_list[bam_file_counter]),
                 shell = True)
 
-            print('No normalization was done. The original {} is copy-pasted as {}/{}.normalized.bam'.format(bam_file_list[bam_file_counter], bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))
+            print('No normalization was done. The original bam file is copy-pasted to {}/{}.normalized.bam'.format(bam_file_dir_list[bam_file_counter], bam_file_name_list[bam_file_counter]))

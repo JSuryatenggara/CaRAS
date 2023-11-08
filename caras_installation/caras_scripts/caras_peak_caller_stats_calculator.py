@@ -83,6 +83,21 @@ def combi_stats(input_tsv, output_tsv):
             if peak_caller_ID_row not in peak_caller_dict:
                 peak_caller_dict.update({peak_caller_ID_row:0})
 
+        individual_peak_caller_name_list = []
+        
+        for peak_caller_dict_key in peak_caller_dict:
+            peak_caller_dict_key_split = peak_caller_dict_key.split('|')
+
+            for individual_peak_caller_name in peak_caller_dict_key_split:
+                if individual_peak_caller_name not in individual_peak_caller_name_list:
+                    individual_peak_caller_name_list.append(individual_peak_caller_name)
+
+        for individual_peak_caller_name in individual_peak_caller_name_list:
+            if individual_peak_caller_name not in peak_caller_dict:
+                peak_caller_dict.update({individual_peak_caller_name:0})
+
+
+
         # Prepare all the stats counters for all possible peak caller combinations
         for peak_caller_dict_key, peak_caller_dict_value in peak_caller_dict.items():
             motif_count_exclusive       = 0

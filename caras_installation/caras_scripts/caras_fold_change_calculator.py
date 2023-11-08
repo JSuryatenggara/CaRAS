@@ -127,43 +127,46 @@ def fold_change_calculator_function_narrow(chip_calculator_arg):
 
             # No use iterating the half remaining peak, break out of the loop
             break
-
-
-
-    # Assign the chromosomal location code for getting the read depth by means of samtools view
-    chip_weighted_peak_center_ID = '{}:{}-{}'.format(chip_weighted_peak_center_chromosome, chip_weighted_peak_center_coordinate, chip_weighted_peak_center_coordinate)
     
-    # Call samtools depth on the control .bam file using one base chromosomal location (start = end);
-    #   will return a line containing the position and the read depth at that exact one base position
-    popen_ctrl = subprocess.Popen('samtools depth -aa -r {} {}'.format(chip_weighted_peak_center_ID, current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
 
-    # Convert the byte-type parsed output of samtools depth
-    ctrl_out = popen_ctrl.communicate()[0].decode("utf-8").split()
 
-    # Get the read depth number we want, which is at the end of the list
-    if len(ctrl_out) == 3:
-        ctrl_weighted_peak_center_read_count = int(ctrl_out[-1])
+    if args.ctrl_bam:
+
+        # Assign the chromosomal location code for getting the read depth by means of samtools view
+        chip_weighted_peak_center_ID = '{}:{}-{}'.format(chip_weighted_peak_center_chromosome, chip_weighted_peak_center_coordinate, chip_weighted_peak_center_coordinate)
+        
+        # Call samtools depth on the control .bam file using one base chromosomal location (start = end);
+        #   will return a line containing the position and the read depth at that exact one base position
+        popen_ctrl = subprocess.Popen('samtools depth -aa -r {} {}'.format(chip_weighted_peak_center_ID, current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
+
+        # Convert the byte-type parsed output of samtools depth
+        ctrl_out = popen_ctrl.communicate()[0].decode("utf-8").split()
+
+        # Get the read depth number we want, which is at the end of the list
+        if len(ctrl_out) == 3:
+            ctrl_weighted_peak_center_read_count = int(ctrl_out[-1])
+        else:
+            ctrl_weighted_peak_center_read_count = 1
+                
+        # Normalize control read depth using the assigned normalization factor
+        ctrl_weighted_peak_center_read_count = ctrl_weighted_peak_center_read_count / ctrl_normalization_factor_value
+
+        # Calculate the fold change by simply dividing the read depth of the ChIP sample by the read depth of the control sample
+        # If control read depth less than 1, assume that it is 1 (to avoid extreme inflation of 
+        #   fold change value due to extremely small (or zero) denominator)
+        
+        if ctrl_weighted_peak_center_read_count >= 1: 
+            weighted_peak_center_fold_change = chip_weighted_peak_center_read_count / ctrl_weighted_peak_center_read_count
+
+        else: 
+            weighted_peak_center_fold_change = chip_weighted_peak_center_read_count
+
+        # Return the values of interest
+        return round(chip_weighted_peak_center_read_count, 2), round(ctrl_weighted_peak_center_read_count, 2), round(weighted_peak_center_fold_change, 2), round(chip_weighted_peak_center_coordinate)
+
     else:
-        ctrl_weighted_peak_center_read_count = 1
-            
-    # Normalize control read depth using the assigned normalization factor
-    ctrl_weighted_peak_center_read_count = ctrl_weighted_peak_center_read_count / ctrl_normalization_factor_value
 
-
-
-    # Calculate the fold change by simply dividing the read depth of the ChIP sample by the read depth of the control sample
-    # If control read depth less than 1, assume that it is 1 (to avoid extreme inflation of 
-    #   fold change value due to extremely small (or zero) denominator)
-    
-    if ctrl_weighted_peak_center_read_count >= 1: 
-        weighted_peak_center_fold_change = chip_weighted_peak_center_read_count / ctrl_weighted_peak_center_read_count
-
-    else: 
-        weighted_peak_center_fold_change = chip_weighted_peak_center_read_count
-
-    # Return the values of interest
-    return round(chip_weighted_peak_center_read_count, 2), round(ctrl_weighted_peak_center_read_count, 2), round(weighted_peak_center_fold_change, 2), round(chip_weighted_peak_center_coordinate)
-
+        return round(chip_weighted_peak_center_read_count, 2), 'N/A', round(chip_weighted_peak_center_read_count, 2), round(chip_weighted_peak_center_coordinate)
 
 
 
@@ -174,34 +177,37 @@ def fold_change_calculator_function_broad(chip_calculator_arg):
     popen_chip = subprocess.Popen('samtools view -c {} {}'.format(current_chip_bam, chip_calculator_arg), shell = True, stdout = subprocess.PIPE)
     chip_out = popen_chip.communicate()[0] # Get the number of all reads
     chip_tag_count = int(chip_out.strip()) # Remove all whitespaces, so can be converted into integer
-    
-    # Call samtools view on the control .bam file using the Peak ID;
-    #   will return the number of all reads found between the start and end positions
-    popen_ctrl = subprocess.Popen('samtools view -c {} {}'.format(current_ctrl_bam, chip_calculator_arg), shell = True, stdout = subprocess.PIPE)
-    ctrl_out = popen_ctrl.communicate()[0] # Get the number of all reads
-    ctrl_tag_count = int(ctrl_out.strip()) # Remove all whitespaces, so can be converted into integer
-    
+
     # Normalize ChIP read depth using the assigned normalization factor
     chip_tag_count = chip_tag_count / chip_normalization_factor_value
 
-    # Normalize control read depth using the assigned normalization factor
-    ctrl_tag_count = ctrl_tag_count / ctrl_normalization_factor_value
+    if args.ctrl_bam:
 
+        # Call samtools view on the control .bam file using the Peak ID;
+        #   will return the number of all reads found between the start and end positions
+        popen_ctrl = subprocess.Popen('samtools view -c {} {}'.format(current_ctrl_bam, chip_calculator_arg), shell = True, stdout = subprocess.PIPE)
+        ctrl_out = popen_ctrl.communicate()[0] # Get the number of all reads
+        ctrl_tag_count = int(ctrl_out.strip()) # Remove all whitespaces, so can be converted into integer
 
+        # Normalize control read depth using the assigned normalization factor
+        ctrl_tag_count = ctrl_tag_count / ctrl_normalization_factor_value
 
-    # Calculate the fold change by simply dividing the read depth of the ChIP sample by the read depth of the control sample
-    # If control read depth less than 1, assume that it is 1 (to avoid extreme inflation of 
-    #   fold change value due to extremely small (or zero) denominator)
-    
-    if ctrl_tag_count >= 1: 
-        average_fold_change = chip_tag_count / ctrl_tag_count
+        # Calculate the fold change by simply dividing the read depth of the ChIP sample by the read depth of the control sample
+        # If control read depth less than 1, assume that it is 1 (to avoid extreme inflation of 
+        #   fold change value due to extremely small (or zero) denominator)
+        
+        if ctrl_tag_count >= 1: 
+            average_fold_change = chip_tag_count / ctrl_tag_count
 
-    else: 
-        average_fold_change = chip_tag_count
+        else: 
+            average_fold_change = chip_tag_count
 
-    # Return the values of interest
-    return round(chip_tag_count, 2), round(ctrl_tag_count, 2), round(average_fold_change, 2)
+        # Return the values of interest
+        return round(chip_tag_count, 2), round(ctrl_tag_count, 2), round(average_fold_change, 2)
 
+    else:
+
+        return round(chip_tag_count, 2), 'N/A', round(chip_tag_count, 2)
 
 
 
@@ -263,8 +269,8 @@ parser.add_argument('--chip_bam',
                     required = True)
 
 parser.add_argument('--ctrl_bam', 
-                    nargs = '+', help = '<Required> The control dataset aligned reads (.bam) file: ordered by replicate number, separated by space.', 
-                    required = True)
+                    nargs = '+', help = '<Optional> The control dataset aligned reads (.bam) file: ordered by replicate number, separated by space.', 
+                    required = False)
 
 parser.add_argument('--normfactor', 
                     help = '<Optional> Assign the factor to use for read counts normalization', 
@@ -272,13 +278,11 @@ parser.add_argument('--normfactor',
 
 parser.add_argument('--chip_norm', 
                     nargs = '+', 
-                    help = '<Required if using --normfactor user_value>, Assign the custom user values for the ChIP replicates: order by replicate number, separated by space', 
-                    type = int)
+                    help = '<Required if using --normfactor user_value>, Assign the custom user values for the ChIP replicates: order by replicate number, separated by space. Alternatively, if a single numerical value is given, that value will be used for all ChIP replicates.')
 
 parser.add_argument('--ctrl_norm', 
                     nargs = '+', 
-                    help = '<Required if using --normfactor user_value>, Assign the custom user values for the control replicates: order by replicate number, separated by space', 
-                    type = int)
+                    help = '<Required if using --normfactor user_value>, Assign the custom user values for the control replicates: order by replicate number, separated by space. Alternatively, if a single numerical value is given, that value will be used for all control replicates.')
 
 args = parser.parse_args()
 
@@ -296,7 +300,9 @@ output_tsv_full_path = os.path.abspath(args.output_tsv)
 
 # Parsing the absolute path, basename, and extension of the ChIP and control .bam files:
 chip_bam_absolute_path, chip_bam_name, chip_bam_extension = file_basename_parsing(args.chip_bam)
-ctrl_bam_absolute_path, ctrl_bam_name, ctrl_bam_extension = file_basename_parsing(args.ctrl_bam)
+
+if args.ctrl_bam:
+    ctrl_bam_absolute_path, ctrl_bam_name, ctrl_bam_extension = file_basename_parsing(args.ctrl_bam)
 
 
 
@@ -322,86 +328,141 @@ peak_df['Strand']                   = '.'
 
 
 
-if len(chip_bam_absolute_path) == 1 and len(ctrl_bam_absolute_path) == 1:
+
+if len(chip_bam_absolute_path) == 1:
     # Assign column names for fold_change_calculator_function outputs in scenario where there are no multiple replicates
     calculator_output_column_name = ['ChIP Tag Count', 'Control Tag Count', 'Fold Change', 'Peak Center']
 
-if len(chip_bam_absolute_path) > 1 and len(ctrl_bam_absolute_path) > 1:
+if len(chip_bam_absolute_path) > 1:
     # Assign column names for fold_change_calculator_function outputs in scenario where there are multiple replicates
     calculator_output_column_name = ['ChIP Tag Count Rep {}'.format(chip_replicate_counter + 1) for chip_replicate_counter in range(len(chip_bam_absolute_path))] + ['Control Tag Count Rep {}'.format(chip_replicate_counter + 1) for chip_replicate_counter in range(len(chip_bam_absolute_path))] + ['Fold Change Rep {}'.format(chip_replicate_counter + 1) for chip_replicate_counter in range(len(chip_bam_absolute_path))] + ['Peak Center Rep {}'.format(chip_replicate_counter + 1) for chip_replicate_counter in range(len(chip_bam_absolute_path))]
 
 
 
+if args.ctrl_bam:
+
+    for chip_replicate_counter in range(len(chip_bam_absolute_path)):
+        print('Running the calculator on ChIP replicate {} and {}'.format(chip_bam_name[chip_replicate_counter], ctrl_bam_name[chip_replicate_counter]))
+
+        current_chip_bam = chip_bam_absolute_path[chip_replicate_counter]
+        current_ctrl_bam = ctrl_bam_absolute_path[chip_replicate_counter]
+
+        # Default normalization factor
+        chip_normalization_factor_value = 1
+        # Default normalization factor
+        ctrl_normalization_factor_value = 1
+
+
+
+        if args.normfactor == 'mapped':
+            popen_chip_mapped = subprocess.Popen('samtools view -F4 -c {}'.format(current_chip_bam), shell = True, stdout = subprocess.PIPE)
+            # Get the number of mapped reads in the ChIP .bam file
+            chip_mapped_out = popen_chip_mapped.communicate()[0]
+            chip_mapped_read_count = int(chip_mapped_out.strip())
+            print('chip_mapped_read_count:', chip_mapped_read_count)
+
+            popen_ctrl_mapped = subprocess.Popen('samtools view -F4 -c {}'.format(current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
+            # Get the number of mapped reads in the control .bam file
+            ctrl_mapped_out = popen_ctrl_mapped.communicate()[0]
+            ctrl_mapped_read_count = int(ctrl_mapped_out.strip())
+            print('ctrl_mapped_read_count:', ctrl_mapped_read_count)
+            
+            # Calculate the normalization factor for the ChIP sample read depths
+            chip_normalization_factor_value = chip_mapped_read_count / ctrl_mapped_read_count
+            ctrl_normalization_factor_value = 1
+
+
+
+        if args.normfactor == 'uniquely_mapped':
+            popen_chip_uniquely_mapped = subprocess.Popen('samtools view -F256 -c {}'.format(current_chip_bam), shell = True, stdout = subprocess.PIPE)
+            # Get the number of uniquely mapped reads in the ChIP .bam file
+            chip_uniquely_mapped_out = popen_chip_uniquely_mapped.communicate()[0]
+            chip_uniquely_mapped_read_count = int(chip_uniquely_mapped_out.strip())
+            print('chip_uniquely_mapped_read_count:', chip_uniquely_mapped_read_count)
+
+            popen_ctrl_uniquely_mapped = subprocess.Popen('samtools view -F256 -c {}'.format(current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
+            # Get the number of uniquely mapped reads in the control .bam file
+            ctrl_uniquely_mapped_out = popen_ctrl_uniquely_mapped.communicate()[0]
+            ctrl_uniquely_mapped_read_count = int(ctrl_uniquely_mapped_out.strip())
+            print('ctrl_uniquely_mapped_read_count:', ctrl_uniquely_mapped_read_count)
+
+            # Calculate the normalization factor for the ChIP sample read depths
+            chip_normalization_factor_value = chip_uniquely_mapped_read_count / ctrl_uniquely_mapped_read_count
+            ctrl_normalization_factor_value = 1
+        
+
+
+        if args.normfactor == 'user_value':
+            # Get the ChIP normalization factor directly from the user inputted argument
+            chip_norm_factor = args.chip_norm
+            # Get the control normalization factor directly from the user inputted argument
+            ctrl_norm_factor = args.ctrl_norm
+
+            if len(chip_norm_factor) == len(chip_bam_absolute_path):
+                try:
+                    chip_normalization_factor_value = float(chip_norm_factor[chip_replicate_counter])
+                except:
+                    print('Please enter only numerical values for --chip_norm')
+                    print('Exiting program')
+
+            elif len(chip_norm_factor) == 1:
+                try:
+                    chip_normalization_factor_value = float(chip_norm_factor[0])
+                except:
+                    print('Please enter only numerical values for --chip_norm')
+                    print('Exiting program')            
+            
+            else:
+                print('The argument given to flag --chip_norm is not equal to the number of replicates nor a single numerical value')
+                print('Exiting program')
+                exit()
+
+            if len(ctrl_norm_factor) == len(chip_bam_absolute_path):
+                try:
+                    ctrl_normalization_factor_value = float(ctrl_norm_factor[chip_replicate_counter])
+                except:
+                    print('Please enter only numerical values for --ctrl_norm')
+                    print('Exiting program')
+                    
+            elif len(ctrl_norm_factor) == 1:
+                try:
+                    ctrl_normalization_factor_value = float(ctrl_norm_factor[0])
+                except:
+                    print('Please enter only numerical values for --ctrl_norm')
+                    print('Exiting program')
+            
+            else:
+                print('The argument given to flag --ctrl_norm is not equal to the number of replicates nor a single numerical value')
+                print('Exiting program')
+                exit()
+
+        print('chip_normalization_factor_value:', chip_normalization_factor_value)
+        print('ctrl_normalization_factor_value:', ctrl_normalization_factor_value)
+
+
+
+else:
+
+    print('No control sample used. No normalization will be performed.')
+
+
+
 for chip_replicate_counter in range(len(chip_bam_absolute_path)):
-    print('Running the calculator on ChIP replicate {} and {}'.format(chip_bam_name[chip_replicate_counter], ctrl_bam_name[chip_replicate_counter]))
 
     current_chip_bam = chip_bam_absolute_path[chip_replicate_counter]
-    current_ctrl_bam = ctrl_bam_absolute_path[chip_replicate_counter]
 
     # Default normalization factor
     chip_normalization_factor_value = 1
     # Default normalization factor
     ctrl_normalization_factor_value = 1
 
-
-
-    if args.normfactor == 'mapped':
-        popen_chip_mapped = subprocess.Popen('samtools view -F4 -c {}'.format(current_chip_bam), shell = True, stdout = subprocess.PIPE)
-        # Get the number of mapped reads in the ChIP .bam file
-        chip_mapped_out = popen_chip_mapped.communicate()[0]
-        chip_mapped_read_count = int(chip_mapped_out.strip())
-        print('chip_mapped_read_count:', chip_mapped_read_count)
-
-        popen_ctrl_mapped = subprocess.Popen('samtools view -F4 -c {}'.format(current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
-        # Get the number of mapped reads in the control .bam file
-        ctrl_mapped_out = popen_ctrl_mapped.communicate()[0]
-        ctrl_mapped_read_count = int(ctrl_mapped_out.strip())
-        print('ctrl_mapped_read_count:', ctrl_mapped_read_count)
-        
-        # Calculate the normalization factor for the ChIP sample read depths
-        chip_normalization_factor_value = chip_mapped_read_count / ctrl_mapped_read_count
-        ctrl_normalization_factor_value = 1
-
-
-
-    if args.normfactor == 'uniquely_mapped':
-        popen_chip_uniquely_mapped = subprocess.Popen('samtools view -F256 -c {}'.format(current_chip_bam), shell = True, stdout = subprocess.PIPE)
-        # Get the number of uniquely mapped reads in the ChIP .bam file
-        chip_uniquely_mapped_out = popen_chip_uniquely_mapped.communicate()[0]
-        chip_uniquely_mapped_read_count = int(chip_uniquely_mapped_out.strip())
-        print('chip_uniquely_mapped_read_count:', chip_uniquely_mapped_read_count)
-
-        popen_ctrl_uniquely_mapped = subprocess.Popen('samtools view -F256 -c {}'.format(current_ctrl_bam), shell = True, stdout = subprocess.PIPE)
-        # Get the number of uniquely mapped reads in the control .bam file
-        ctrl_uniquely_mapped_out = popen_ctrl_uniquely_mapped.communicate()[0]
-        ctrl_uniquely_mapped_read_count = int(ctrl_uniquely_mapped_out.strip())
-        print('ctrl_uniquely_mapped_read_count:', ctrl_uniquely_mapped_read_count)
-
-        # Calculate the normalization factor for the ChIP sample read depths
-        chip_normalization_factor_value = chip_uniquely_mapped_read_count / ctrl_uniquely_mapped_read_count
-        ctrl_normalization_factor_value = 1
-    
-
-
-    if args.normfactor == 'user_value':
-        # Get the ChIP normalization factor directly from the user inputted argument
-        chip_norm_factor = args.chip_norm
-        # Get the control normalization factor directly from the user inputted argument
-        ctrl_norm_factor = args.ctrl_norm
-
-        chip_normalization_factor_value = chip_norm_factor[chip_replicate_counter]
-        ctrl_normalization_factor_value = ctrl_norm_factor[chip_replicate_counter]
-
-    print('chip_normalization_factor_value:', chip_normalization_factor_value)
-    print('ctrl_normalization_factor_value:', ctrl_normalization_factor_value)
-
     # Getting the folder ready for the temporary samtools depth files generated in fold_change_calculator_function
     subprocess.run('mkdir -p temp_{}'.format(chip_bam_name[chip_replicate_counter]), shell = True)
 
-
-
     pool_calculator = multiprocessing.Pool(processes = cpu_count)
     
+    print('Calculating fold change for every peak in {} versus {}'.format(chip_bam_absolute_path[chip_replicate_counter], ctrl_bam_absolute_path[chip_replicate_counter]))
+
     # Takes in a list of each peak's chromosomal location codes (chr:start-end)
     # Reads the current_chip_bam and current_ctrl_bam assigned above at those locations
     # Returns ChIP read depth, control read depth, and fold change value at the weighted peak center of each peak
@@ -427,14 +488,14 @@ for chip_replicate_counter in range(len(chip_bam_absolute_path)):
 
 
 
-    if len(chip_bam_absolute_path) == 1 and len(ctrl_bam_absolute_path) == 1:
+    if len(chip_bam_absolute_path) == 1:
         # Save the final fold_change_calculator_function outputs in their appropriate pandas columns
         peak_df['ChIP Tag Count']       = chip_tag_count_list
         peak_df['Control Tag Count']    = ctrl_tag_count_list
         peak_df['Fold Change']          = fold_change_list
         peak_df['Peak Center']          = peak_center_list
 
-    if len(chip_bam_absolute_path) > 1 and len(ctrl_bam_absolute_path) > 1:
+    if len(chip_bam_absolute_path) > 1:
         # Save the current fold_change_calculator_function outputs in their 
         #   appropriate pandas columns before going for another iteration
         peak_df['ChIP Tag Count Rep {}'.format(chip_replicate_counter + 1)]     = chip_tag_count_list
@@ -480,15 +541,12 @@ peak_df = peak_df[['Peak ID',
                     'Gene Name', 
                     'Gene Alias', 
                     'Gene Description', 
-                    'Gene Type', 
-                    'CpG%', 
-                    'GC%'
-                    ]]
+                    'Gene Type']]
 
 # Fix the bug where pandas automatically adds one decimal point to all the numbers in the 'Entrez ID' column
 # Some entries in the 'Entrez ID' column are NaN. When pandas parse column containing numbers 
 #   with one or more NaNs, it automatically assigns all values into float type
-peak_df['Entrez ID'] = peak_df['Entrez ID'].fillna(0).astype('Int64')
+peak_df['Entrez ID'] = peak_df['Entrez ID'].fillna('')
 
 print('Writing the result to file {}'.format(output_tsv_full_path))
 # HOMER annotated peak list augmented with essential information regarding the 
@@ -504,11 +562,11 @@ peak_df['p-value'] = -1 # Creating a new column "p-value" in peak_df, which valu
 peak_df['q-value'] = -1 # Creating a new column "q-value" in peak_df, which values are all -1
 peak_df['peak'] = -1 # Creating a new column "peak" in peak_df, which values are all -1 (only needed for .narrowPeak)
 
-if len(chip_bam_absolute_path) == 1 and len(ctrl_bam_absolute_path) == 1: # If there are only a single "Fold Change" column in the fold change calculated peak list
+if len(chip_bam_absolute_path) == 1: # If there are only a single "Fold Change" column in the fold change calculated peak list
     # Creating a new column "signalValue" in peak_df, which values are obtained from the "Fold Change" column values
     peak_df['signalValue'] = peak_df[['Fold Change']]
 
-if len(chip_bam_absolute_path) > 1 and len(ctrl_bam_absolute_path) > 1: # If there are multi-replicated "Fold Change" columns in the fold change calculated peak list
+if len(chip_bam_absolute_path) > 1: # If there are multi-replicated "Fold Change" columns in the fold change calculated peak list
     # Creating a new column "signalValue" in peak_df, which values are obtained from the average of "Fold Change" columns values
     peak_df['signalValue'] = peak_df[['Fold Change Rep {}'.format(chip_replicate_counter + 1) for chip_replicate_counter in range(len(chip_bam_absolute_path))]].mean(axis = 1)
 

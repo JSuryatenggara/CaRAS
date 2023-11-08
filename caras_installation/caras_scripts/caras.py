@@ -10,10 +10,10 @@
 #   and finally compile everything in one comprehensive, spreadsheet-compatible, complete list.
 
 # INPUT         - Chromatin IP (+ replicates if available):
-#                   - FASTQ or gzipped FASTQ files if reads are raw sequencer output
+#                   - FASTQ or gzip -fped FASTQ files if reads are raw sequencer output
 #                   - BAM files if reads are already preprocessed and aligned
 #               - Background control (+ replicates if available): 
-#                   - FASTQ or gzipped FASTQ files if reads are raw sequencer output
+#                   - FASTQ or gzip -fped FASTQ files if reads are raw sequencer output
 #                   - BAM files if reads are already preprocessed and aligned
 
 # GENERATED     - 00_raw_data_script.sh                             - copy and rename raw sequencing data
@@ -178,11 +178,6 @@ parser.add_argument('--mode',
                     required = True, 
                     choices = ['single', 'paired'])
 
-parser.add_argument('--peak', 
-                    help = '<Optional> Peak type. Narrow peaks for transcription factors (default). Broad peaks for histone modifiers. Pick unsure if peak type is unknown (ChIP-AP will run in both narrow and broad modes, separately)',
-                    choices = ['narrow', 'broad', 'unsure'],
-                    default = 'narrow')
-
 parser.add_argument('--genome', 
                     help = '<Required> Your genome folder.', 
                     required = True)
@@ -218,15 +213,20 @@ parser.add_argument('--custom_setting_table',
                     help = '<Optional> Expert mode. Your 2*n-sized table file containing custom arguments for every modules.')
 
 parser.add_argument('--fcmerge', 
-                    help = '<Optional> Use to force fold change analysis based on merged replicates instead of on each replicate', 
+                    help = '<Optional> Use to force fold change analysis based on merged replicates instead of on each replicate. Only relevant for bulk analysis', 
                     action = 'store_true')
+
+parser.add_argument('--clustnum', 
+                    help = '<Optional> Expected number of clusters to be formed by all single-cell samples. When not provided, CaRAS will attempt to calculate the optimal number of clusters by itself (auto). Only relevant for single-cell analysis. Default value is 0 (auto).', 
+                    type = int,
+                    default = 0)
 
 parser.add_argument('--motif', 
                     help = '<Optional> Your predicted/known motif file, in HOMER matrix format, .motif extension')
 
 parser.add_argument('--ref', 
                     help = '<Optional> Your sample organism genome reference build. Default is hg38 (human).', 
-                    choices = ['hg19', 'hg38', 'mm9', 'mm10', 'dm6', 'sacCer3'], 
+                    choices = ['hg19', 'hg38', 'mm9', 'mm10', 'mm39', 'dm6', 'sacCer3'], 
                     default = 'hg38')
 
 parser.add_argument('--norm_ref', 
@@ -280,7 +280,7 @@ caras_program_name = 'caras.py'
 
 dataset_name = args.setname # Resulting files will be named based in this
 read_mode = args.mode # Sequencing read mode of the fastq files. Single-end or paired-end
-peak_type = args.peak # Experiment-dependent peak type. Narrow for TF peaks. Broad for histone modifier peaks. Unsure if unknown (will run both narrow and broad modes).
+peak_type = 'narrow'
 
 genome_dir = os.path.abspath(args.genome) # Absolute path to the genome folder
 output_folder = os.path.abspath(args.output) # Absolute path to the folder [dataset_name] that contains all the outputs of the suite
@@ -293,6 +293,8 @@ if args.motif:
 if not args.motif:
     motif_file_full_path = None
 
+complete_genome = ['hg19', 'hg38', 'mm9', 'mm10', 'dm6', 'sacCer3']
+
 # Reference genome to be used depending on sample organism. For now, the suite can take in human and mouse samples
 if args.ref == 'hg19':
     genome_ref = 'hg19' # For human samples
@@ -302,6 +304,8 @@ if args.ref == 'mm9':
     genome_ref = 'mm9' # For mice samples
 if args.ref == 'mm10':
     genome_ref = 'mm10' # For mice samples
+if args.ref == 'mm39':
+    genome_ref = 'mm39' # For mice samples
 if args.ref == 'dm6':
     genome_ref = 'dm6' # For fruitfly samples
 if args.ref == 'sacCer3':
@@ -317,10 +321,15 @@ force_merge = 1 if args.fcmerge else 0
 
 analysis_mode = args.analysis
 
-homer_motif_peakset = [str(peakset) for peakset in args.homer_motif]
-meme_motif_peakset = [str(peakset) for peakset in args.meme_motif]
+expected_cluster = args.clustnum
 
-print('CARAS set on {} mode'.format(analysis_mode))
+if args.homer_motif:
+    homer_motif_peakset = [str(peakset) for peakset in args.homer_motif]
+
+if args.meme_motif:
+    meme_motif_peakset = [str(peakset) for peakset in args.meme_motif]
+
+print('CaRAS set on {} mode'.format(analysis_mode))
 
 home_dir = os.path.expanduser('~') # Absolute path to the user's home directory
 root_dir = os.path.expanduser('/') # Absolute path to the root directory
@@ -338,66 +347,71 @@ current_dir = str(pathlib.Path(__file__).parent.absolute())
 # ### SOFTWARE UPDATE CHECK
 # ########################################################################################################################
 
-# print('\nChecking for updates on GitHub\n')
+print('\nChecking for updates on GitHub\n')
 
-# remote_directory = 'https://raw.githubusercontent.com/JSuryatenggara/ChIP-AP/main/caras_installation'
+remote_directory = 'https://raw.githubusercontent.com/JSuryatenggara/CaRAS/main/caras_installation'
 
-# caras_scripts_dir = str(pathlib.Path(__file__).parent.absolute())
-# caras_installation_dir = '/'.join((caras_scripts_dir.split('/'))[:-1])
-# local_directory = caras_installation_dir
+caras_scripts_dir = str(pathlib.Path(__file__).parent.absolute())
+caras_installation_dir = '/'.join((caras_scripts_dir.split('/'))[:-1])
+local_directory = caras_installation_dir
 
-# program_update_check_list = ['caras_scripts/caras.py',
-#                             'caras_scripts/caras_dashboard.py',
-#                             'caras_scripts/caras_wizard.py',
-#                             'caras_scripts/caras_reads_normalizer.py',
-#                             'caras_scripts/caras_Genrich.py',
-#                             'caras_scripts/caras_peak_feature_extractor.py',
-#                             'caras_scripts/caras_fold_change_calculator.py',
-#                             'caras_scripts/caras_IDR_integrator.py',
-#                             'caras_scripts/caras_GO_annotator.py',
-#                             'caras_scripts/caras_pathway_annotator.py',
-#                             'caras_scripts/caras_peak_caller_stats_calculator.py',
-#                             'caras_scripts/caras_meme_sequence_extractor.py',
-#                             'caras_scripts/caras_default_settings_table.tsv',
-#                             'caras_env_linux.yml',
-#                             'caras_env_macos.yml',
-#                             'caras_installer.py',
-#                             'homer_genome_update.sh']
+program_update_check_list = ['caras_scripts/caras.py',
+                            'caras_scripts/caras_dashboard.py',
+                            'caras_scripts/caras_wizard.py',
+                            'caras_scripts/caras_reads_normalizer.py',
+                            'caras_scripts/caras_Genrich.py',
+                            'caras_scripts/caras_upset_plotter.py',
+                            'caras_scripts/caras_peak_feature_extractor.py',
+                            'caras_scripts/caras_fold_change_calculator.py',
+                            'caras_scripts/caras_IDR_integrator.py',
+                            'caras_scripts/caras_GO_annotator.py',
+                            'caras_scripts/caras_pathway_annotator.py',
+                            'caras_scripts/caras_peak_caller_stats_calculator.py',
+                            'caras_scripts/caras_meme_sequence_extractor.py',
+                            'caras_scripts/caras_default_settings_table.tsv',
+                            'caras_scripts/SEACR_1.3.sh',
+                            'caras_scripts/SEACR_1.3.R',
+                            'caras_env_linux.yml',
+                            'caras_env_macos.yml',
+                            'caras_installer.py',
+                            'homer_genome_update.sh',
+                            'idr.py',
+                            'chromfa_splitter.py']
 
 
-# update_counter = 0
+update_counter = 0
 
-# for program in program_update_check_list:
+for program in program_update_check_list:
     
-#     try:
-#         remote_file = requests.get('{}/{}'.format(remote_directory, program))
+    try:
+        remote_file = requests.get('{}/{}'.format(remote_directory, program))
 
-#     except:
-#         print('{} is no longer required in the latest implementation of ChIP-AP'.format(program.split('/')[-1]))
-#         continue
+    except:
+        print('{} is no longer required in the latest implementation of CaRAS'.format(program.split('/')[-1]))
+        continue
         
-#     try:
-#         local_file = open('{}/{}'.format(local_directory, program), 'r')
+    try:
+        local_file = open('{}/{}'.format(local_directory, program), 'r')
 
-#     except:
-#         print('WARNING: {} is not found in your local system'.format(program.split('/')[-1]))
-#         continue
-
-
-#     if remote_file.text == local_file.read():
-#         print('{} is up to date'.format(program.split('/')[-1]))
-
-#     elif remote_file.text != local_file.read():
-#         update_counter += 1
-#         print('Newer version of {} is available on our github'.format(program.split('/')[-1]))
+    except:
+        print('WARNING: {} is not found in your local system'.format(program.split('/')[-1]))
+        continue
 
 
-# if update_counter == 0:
-#     print('\nYour ChIP-AP is up to date\n')
+    if remote_file.text == local_file.read():
+        print('{} is up to date'.format(program.split('/')[-1]))
 
-# if update_counter > 0:
-#     print('\n{} updates available on our GitHub (https://github.com/JSuryatenggara/ChIP-AP)'.format(update_counter))
-#     print('Update all at once by downloading our latest release (https://github.com/JSuryatenggara/ChIP-AP/releases)\n')
+    elif remote_file.text != local_file.read():
+        update_counter += 1
+        print('Newer version of {} is available on our github'.format(program.split('/')[-1]))
+
+
+if update_counter == 0:
+    print('\nYour CaRAS is up to date\n')
+
+if update_counter > 0:
+    print('\n{} updates available on our GitHub (https://github.com/JSuryatenggara/CaRAS)'.format(update_counter))
+    print('Update all at once by downloading our latest release (https://github.com/JSuryatenggara/CaRAS/releases)\n')
 
 
 
@@ -405,16 +419,17 @@ current_dir = str(pathlib.Path(__file__).parent.absolute())
 ### EFFECTIVE GENOME SIZE ASSIGNMENT
 ########################################################################################################################
 
-# Defining effective genome sizes for all ChIP-AP supported genomes:
+# Defining effective genome sizes for all CaRAS supported genomes:
 # Source: https://deeptools.readthedocs.io/en/develop/content/feature/effectiveGenomeSize.html
 # sacCer3_effective_genome_size was manually calculated based on the number of non-N characters in the genome's FASTA file
 
-hg19_effective_genome_size = '2864785220'
-hg38_effective_genome_size = '2913022398'
-mm9_effective_genome_size = '2620345972'
-mm10_effective_genome_size = '2652783500'
-dm6_effective_genome_size = '142573017'
-sacCer3_effective_genome_size = '12071326' 
+hg19_effective_genome_size      = '2861327131'
+hg38_effective_genome_size      = '2937639113'
+mm9_effective_genome_size       = '2558509480'
+mm10_effective_genome_size      = '2647521431'
+mm39_effective_genome_size      = '2649921816'
+dm6_effective_genome_size       = '137057575'
+sacCer3_effective_genome_size   = '12071326'
 
 if genome_ref == 'hg19':
     effective_genome_size = hg19_effective_genome_size
@@ -424,6 +439,8 @@ if genome_ref == 'mm9':
     effective_genome_size = mm9_effective_genome_size
 if genome_ref == 'mm10':
     effective_genome_size = mm10_effective_genome_size
+if genome_ref == 'mm39':
+    effective_genome_size = mm39_effective_genome_size
 if genome_ref == 'dm6':
     effective_genome_size = dm6_effective_genome_size
 if genome_ref == 'sacCer3':
@@ -646,7 +663,21 @@ if args.custom_setting_table:
 
 if not args.custom_setting_table:
     # If not provided, suite will read the default custom settings table, currently provided in the genome folder
-    custom_settings_table_full_path = os.path.abspath('{}/caras_default_settings_table.tsv'.format(args.genome))
+    if os.path.isfile('{}/caras_default_settings_table.tsv'.format(args.genome)):
+        custom_settings_table_full_path = os.path.abspath('{}/caras_default_settings_table.tsv'.format(args.genome))
+
+    else:
+        caras_path_check = subprocess.Popen('which caras.py', shell = True, stdout = subprocess.PIPE) # Get the full path to caras.py
+        caras_path = caras_path_check.communicate()[0].decode('utf-8')
+        caras_dir = '/'.join(caras_path.split('/')[:-1])
+        print('{}/caras_default_settings_table.tsv'.format(caras_dir))
+        
+        if os.path.isfile('{}/caras_default_settings_table.tsv'.format(caras_dir)):
+            custom_settings_table_full_path = '{}/caras_default_settings_table.tsv'.format(caras_dir)
+
+        else:
+            print('Could not find default_settings_table.tsv in default paths. Please provide the path manually using --custom_setting_table flag')
+            exit()
 
 custom_settings_table_df        = pd.read_csv(custom_settings_table_full_path, delimiter='\t')
 custom_settings_table_df        = custom_settings_table_df.replace(np.nan, '', regex = True)
@@ -672,6 +703,7 @@ suite_program_list = ["fastqc1",
                         "homer_mergePeaks",
                         "homer_annotatePeaks",
                         "fold_change_calculator",
+                        "peak_feature_extractor",
                         "homer_findMotifsGenome",
                         "meme_chip"]
 
@@ -719,27 +751,28 @@ for custom_settings_table_array_row in custom_settings_table_array:
 
 # Finally, join all arguments value within each program key with a single space and 
 #   assign the joined string into their own variable for easier calling later downstream
-fastqc1_arg                 = ' ' + ' '.join(argument_dict['fastqc1'])
-clumpify_arg                = ' ' + ' '.join(argument_dict['clumpify'])
-bbduk_arg                   = ' ' + ' '.join(argument_dict['bbduk'])
-trimmomatic_arg             = ' ' + ' '.join(argument_dict['trimmomatic'])
-fastqc2_arg                 = ' ' + ' '.join(argument_dict['fastqc2'])
-bwa_mem_arg                 = ' ' + ' '.join(argument_dict['bwa_mem'])
-samtools_view_arg           = ' ' + ' '.join(argument_dict['samtools_view'])
-plotfingerprint_arg         = ' ' + ' '.join(argument_dict['plotfingerprint'])
-reads_normalizer_arg        = ' ' + ' '.join(argument_dict['reads_normalizer'])
-fastqc3_arg                 = ' ' + ' '.join(argument_dict['fastqc3'])
-macs2_callpeak_arg          = ' ' + ' '.join(argument_dict['macs2_callpeak'])
-gem_arg                     = ' ' + ' '.join(argument_dict['gem'])
-sicer2_arg                  = ' ' + ' '.join(argument_dict['sicer2'])
-homer_findPeaks_arg         = ' ' + ' '.join(argument_dict['homer_findPeaks'])
-genrich_arg                 = ' ' + ' '.join(argument_dict['genrich'])
-seacr_arg                   = ' ' + ' '.join(argument_dict['seacr'])
-homer_mergePeaks_arg        = ' ' + ' '.join(argument_dict['homer_mergePeaks'])
-homer_annotatePeaks_arg     = ' ' + ' '.join(argument_dict['homer_annotatePeaks'])
-fold_change_calculator_arg  = ' ' + ' '.join(argument_dict['fold_change_calculator'])
-homer_findMotifsGenome_arg  = ' ' + ' '.join(argument_dict['homer_findMotifsGenome'])
-meme_chip_arg               = ' ' + ' '.join(argument_dict['meme_chip'])
+fastqc1_arg                 = ' ' + ' '.join(argument_dict['fastqc1']).strip(' ')
+clumpify_arg                = ' ' + ' '.join(argument_dict['clumpify']).strip(' ')
+bbduk_arg                   = ' ' + ' '.join(argument_dict['bbduk']).strip(' ')
+trimmomatic_arg             = ' ' + ' '.join(argument_dict['trimmomatic']).strip(' ')
+fastqc2_arg                 = ' ' + ' '.join(argument_dict['fastqc2']).strip(' ')
+bwa_mem_arg                 = ' ' + ' '.join(argument_dict['bwa_mem']).strip(' ')
+samtools_view_arg           = ' ' + ' '.join(argument_dict['samtools_view']).strip(' ')
+plotfingerprint_arg         = ' ' + ' '.join(argument_dict['plotfingerprint']).strip(' ')
+reads_normalizer_arg        = ' ' + ' '.join(argument_dict['reads_normalizer']).strip(' ')
+fastqc3_arg                 = ' ' + ' '.join(argument_dict['fastqc3']).strip(' ')
+macs2_callpeak_arg          = ' ' + ' '.join(argument_dict['macs2_callpeak']).strip(' ')
+gem_arg                     = ' ' + ' '.join(argument_dict['gem']).strip(' ')
+sicer2_arg                  = ' ' + ' '.join(argument_dict['sicer2']).strip(' ')
+homer_findPeaks_arg         = ' ' + ' '.join(argument_dict['homer_findPeaks']).strip(' ')
+genrich_arg                 = ' ' + ' '.join(argument_dict['genrich']).strip(' ')
+seacr_arg                   = ' ' + ' '.join(argument_dict['seacr']).strip(' ')
+homer_mergePeaks_arg        = ' ' + ' '.join(argument_dict['homer_mergePeaks']).strip(' ')
+homer_annotatePeaks_arg     = ' ' + ' '.join(argument_dict['homer_annotatePeaks']).strip(' ')
+fold_change_calculator_arg  = ' ' + ' '.join(argument_dict['fold_change_calculator']).strip(' ')
+peak_feature_extractor_arg  = ' ' + ' '.join(argument_dict['peak_feature_extractor']).strip(' ')
+homer_findMotifsGenome_arg  = ' ' + ' '.join(argument_dict['homer_findMotifsGenome']).strip(' ')
+meme_chip_arg               = ' ' + ' '.join(argument_dict['meme_chip']).strip(' ')
 
 suite_program_arg = [
     fastqc1_arg,
@@ -761,20 +794,19 @@ suite_program_arg = [
     homer_mergePeaks_arg,
     homer_annotatePeaks_arg,
     fold_change_calculator_arg,
+    peak_feature_extractor_arg,
     homer_findMotifsGenome_arg,
     meme_chip_arg]
 
 
 
 ########################################################################################################################
-### UNSURE PEAK TYPE --- RUNNING BOTH PEAK TYPE MODES
+### COMMAND LINE STRING GENERATION
 ########################################################################################################################
 
 analysis_mode_arg = ' --analysis {}'.format(analysis_mode)
 
 read_mode_arg = ' --mode {}'.format(read_mode)
-
-peak_type_arg = ' --peak {}'.format(peak_type)
 
 output_folder_arg = ' --output {}'.format(args.output)
 
@@ -870,12 +902,11 @@ else:
 
 
 
-# Store the (nigh-identical to the one used) ChIP-AP command line that will produce identical pipeline processes
+# Store the (nigh-identical to the one used) CaRAS command line that will produce identical pipeline processes
 if not args.sample_table: # The command line when samples are assigned manually in the command line
-    command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
+    command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
                                                                                 analysis_mode_arg,
                                                                                 read_mode_arg,
-                                                                                peak_type_arg,
                                                                                 chip_r1_arg,
                                                                                 ctrl_r1_arg,
                                                                                 chip_r2_arg,
@@ -897,10 +928,9 @@ if not args.sample_table: # The command line when samples are assigned manually 
                                                                                 run_arg)
 
 if args.sample_table: # The command line when samples are assigned automatically by loading the sample table
-    command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
+    command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
                                                                         analysis_mode_arg,
                                                                         read_mode_arg,
-                                                                        peak_type_arg,
                                                                         output_folder_arg,
                                                                         dataset_name_arg,
                                                                         genome_ref_arg,
@@ -920,107 +950,6 @@ if args.sample_table: # The command line when samples are assigned automatically
 
 print('\nNow processing:')
 print(command_line_string + '\n')
-
-
-
-# When the user type unsure as the peak type, ChIP-AP are designed to run exactly the same command twice
-#   Beginning with a pipeline run under the narrow peak setting (in case the target protein is a transcription factor)
-#   Followed by a pipeline run under the broad peak setting (in case the target protein is a histone modifier)
-if peak_type == 'unsure':
-
-    if dataset_name:
-        dataset_name_arg = ' --setname {}_narrow'.format(dataset_name)
-    else:
-        dataset_name_arg = ''
-
-    # Generate narrow peak command line based on the original command line typed in by the user
-    narrow_command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
-                                                                                    analysis_mode_arg,
-                                                                                    read_mode_arg,
-                                                                                    ' --peak narrow',
-                                                                                    chip_r1_arg,
-                                                                                    ctrl_r1_arg,
-                                                                                    chip_r2_arg,
-                                                                                    ctrl_r2_arg,
-                                                                                    output_folder_arg,
-                                                                                    dataset_name_arg,
-                                                                                    genome_ref_arg,
-                                                                                    genome_dir_arg,
-                                                                                    norm_ref_arg,
-                                                                                    setting_table_arg,
-                                                                                    motif_file_arg,
-                                                                                    fcmerge_arg,
-                                                                                    goann_arg,
-                                                                                    pathann_arg,
-                                                                                    homer_motif_arg,
-                                                                                    meme_motif_arg,
-                                                                                    deltemp_arg,
-                                                                                    cpu_count_arg,
-                                                                                    run_arg)
-
-
-
-    results_dir = '{}/{}_narrow/08_results'.format(output_folder, dataset_name)
-
-    # Get the sample filenames from the narrow peak pipeline
-    unsure_broad_chip_name = ['{}_narrow_chip_rep{}'.format(dataset_name, (list_counter + 1)) for list_counter in range(len(chip_r1_original_name))]
-    # Assign the aligned reads file of the narrow peak pipeline as the samples for the broad peak pipeline
-    unsure_broad_chip_list = ['{}/{}.bam'.format(results_dir, unsure_broad_chip_name[list_counter]) for list_counter in range(len(unsure_broad_chip_name))]
-    unsure_broad_chip_string = ' '.join(unsure_broad_chip_list)
-
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        # Get the sample filenames from the narrow peak pipeline
-        unsure_broad_ctrl_name = ['{}_narrow_ctrl_rep{}'.format(dataset_name, (list_counter + 1)) for list_counter in range(len(ctrl_r1_original_name))]
-        # Assign the aligned reads file of the narrow peak pipeline as the samples for the broad peak pipeline
-        unsure_broad_ctrl_list = ['{}/{}.bam'.format(results_dir, unsure_broad_ctrl_name[list_counter]) for list_counter in range(len(unsure_broad_ctrl_name))]
-        unsure_broad_ctrl_string = ' '.join(unsure_broad_ctrl_list)
-
-    chip_r1_arg = ' --chipR1 {}'.format(unsure_broad_chip_string)
-    
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        ctrl_r1_arg = ' --ctrlR1 {}'.format(unsure_broad_ctrl_string)
-    
-    chip_r2_arg = ''
-    ctrl_r2_arg = ''
-
-    if dataset_name:
-        dataset_name_arg = ' --setname {}_broad'.format(dataset_name)
-    else:
-        dataset_name_arg = ''
-
-    # Generate broad peak command line that takes over the processes after the aligned reads are generated by the preceding narrow peak pipeline
-    # In order to not waste time and resources repeating the processes upstream, as they will produce exacty the same results as the narrow peak pipeline
-    broad_command_line_string = '{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}{}'.format(caras_program_name,
-                                                                                    analysis_mode_arg,
-                                                                                    read_mode_arg,
-                                                                                    ' --peak broad',
-                                                                                    chip_r1_arg,
-                                                                                    ctrl_r1_arg,
-                                                                                    chip_r2_arg,
-                                                                                    ctrl_r2_arg,
-                                                                                    output_folder_arg,
-                                                                                    dataset_name_arg,
-                                                                                    genome_ref_arg,
-                                                                                    genome_dir_arg,
-                                                                                    norm_ref_arg,
-                                                                                    setting_table_arg,
-                                                                                    motif_file_arg,
-                                                                                    fcmerge_arg,
-                                                                                    goann_arg,
-                                                                                    pathann_arg,
-                                                                                    homer_motif_arg,
-                                                                                    meme_motif_arg,
-                                                                                    deltemp_arg,
-                                                                                    cpu_count_arg,
-                                                                                    run_arg)
-
-    # Run the narrow peak pipeline first (results stored under the folder [setname]_narrow)
-    subprocess.run(narrow_command_line_string, shell = True)
-
-    # Then follow up by running the broad peak pipeline (results stored under the folder [setname]_broad)
-    subprocess.run(broad_command_line_string, shell = True)
-
-    exit()
 
 
 
@@ -1077,19 +1006,6 @@ if not trimmomatic_exist:
 if check_program('java -jar {}'.format(trimmomatic_full_path)) is False:
     print('Pre-run test of trimmomatic failed. Please try running trimmomatic individually to check for the problem')
     error_status = 1
-
-# # Try to look for kseq in the home directory first
-# kseq_exist, kseq_full_path = find_program('kseq_test', home_dir)
-# if not kseq_exist:
-#     # If kseq does not exist in the home directory, try looking in the root directory
-#     kseq_exist, kseq_full_path = find_program('kseq_test', root_dir)
-# if not kseq_exist:
-#     print('Please make sure kseq is installed in your computer')
-#     error_status = 1
-
-# if check_program(kseq_full_path) is False:
-#     print('Pre-run test of kseq failed. Please try running kseq individually to check for the problem')
-#     error_status = 1
 
 if which('bwa') is None:
     print('Please make sure bwa is installed, in PATH, and marked as executable')
@@ -1169,27 +1085,21 @@ if check_program('caras_Genrich.py') is False:
     error_status = 1
 
 # Try to look for SEACR in the home directory first
-seacr_sh_exist, seacr_sh_full_path = find_program('SEACR_1.1.sh', home_dir)
-if not seacr_sh_exist:
-    # If seacr does not exist in the home directory, try looking in the root directory
-    seacr_sh_exist, seacr_sh_full_path = find_program('SEACR_1.1.sh', root_dir)
-
-# Try to look for SEACR in the home directory first
-seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.1.R', home_dir)
+seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', home_dir)
 if not seacr_r_exist:
     # If seacr does not exist in the home directory, try looking in the root directory
-    seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.1.R', root_dir)
+    seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', root_dir)
 
-if not seacr_sh_exist or not seacr_r_exist:
-    print('Please make sure seacr is installed in your computer')
+if not seacr_r_exist:
+    print('Please make sure SEACR is installed in your computer')
     error_status = 1
 
-if check_program(seacr_sh_full_path) is False:
-    print('Pre-run test of SEACR.sh failed. Please try running SEACR.sh individually to check for the problem')
-    error_status = 1
-
-if check_program(seacr_r_full_path) is False:
-    print('Pre-run test of SEACR.R failed. Please try running SEACR.R individually to check for the problem')
+if which('SEACR_1.3.sh') is None:
+    print('Please make sure SEACR_1.3.sh is installed, in PATH, and marked as executable')
+    error_status = 1 
+    
+if check_program('SEACR_1.3.sh') is False:
+    print('Pre-run test of SEACR_1.3.sh failed. Please try running SEACR_1.3.sh individually to check for the problem')
     error_status = 1
     
 if which('mergePeaks') is None:
@@ -1200,31 +1110,32 @@ if check_program('mergePeaks') is False:
     print('Pre-run test of mergePeaks failed. Please try running HOMER mergePeaks individually to check for the problem')
     error_status = 1
 
-# Try to look for upSet plot in the home directory first
-upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet_plot_big.R', home_dir)
-if not upset_plot_exist:
-    # If upSet plot does not exist in the home directory, try looking in the root directory
-    upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet_plot_big.R', root_dir)
-if not upset_plot_exist:
-    print('Please make sure upSet plot is installed in your computer')
-    error_status = 1
+# # Try to look for upSet plot in the home directory first
+# upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet.R', home_dir)
+# if not upset_plot_exist:
+#     # If upSet plot does not exist in the home directory, try looking in the root directory
+#     upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet.R', root_dir)
+# if not upset_plot_exist:
+#     print('Please make sure multi_peaks_UpSet.R script exists in your computer')
+#     error_status = 1
 
-if check_program(upset_plot_full_path) is False:
-    print('Pre-run test of upSet plot failed. Please try running upSet plot individually to check for the problem')
-    error_status = 1
+# if check_program(upset_plot_full_path) is False:
+#     print('Pre-run test of UpSet plot failed. Please try running multi_peaks_UpSet.R individually to check for the problem')
+#     error_status = 1
 
-# Try to look for multi Venn in the home directory first
-multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', home_dir)
-if not multi_venn_exist:
-    # If multi Venn does not exist in the home directory, try looking in the root directory
-    multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', root_dir)
-if not multi_venn_exist:
-    print('Please make sure multi Venn is installed in your computer')
-    error_status = 1
+### MULTIVENN SKIPPED FOR CARAS (CANNOT TAKE MORE THAN 5 SETS WHILE CARAS HAS 6) ###
+# # Try to look for multi Venn in the home directory first
+# multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', home_dir)
+# if not multi_venn_exist:
+#     # If multi Venn does not exist in the home directory, try looking in the root directory
+#     multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', root_dir)
+# if not multi_venn_exist:
+#     print('Please make sure multi Venn is installed in your computer')
+#     error_status = 1
 
-if check_program(multi_venn_full_path) is False:
-    print('Pre-run test of multi Venn failed. Please try running multi Venn individually to check for the problem')
-    error_status = 1
+# if check_program(multi_venn_full_path) is False:
+#     print('Pre-run test of multi Venn failed. Please try running multi Venn individually to check for the problem')
+#     error_status = 1
 
 if which('annotatePeaks.pl') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
@@ -1240,6 +1151,14 @@ if which('caras_reads_normalizer.py') is None:
 
 if check_program('caras_reads_normalizer.py') is False:
     print('Pre-run test of caras_reads_normalizer.py failed. Please try running caras_reads_normalizer.py individually to check for the problem')
+    error_status = 1
+
+if which('caras_upset_plotter.py') is None:
+    print('Please make sure caras_upset_plotter.py is installed, in PATH, and marked as executable')
+    error_status = 1 
+
+if check_program('caras_upset_plotter.py') is False:
+    print('Pre-run test of caras_upset_plotter.py failed. Please try running caras_upset_plotter.py individually to check for the problem')
     error_status = 1
 
 if which('caras_fold_change_calculator.py') is None:
@@ -1406,7 +1325,7 @@ if start_from_bam == False:
         for list_counter in range(len(chip_r1_name)):
             if chip_r1_original_extension[list_counter] == '.fq' or chip_r1_original_extension[list_counter] == '.fastq':
 
-                raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                     raw_data_dir, 
                     chip_name[list_counter]))
 
@@ -1440,7 +1359,7 @@ if start_from_bam == False:
             for list_counter in range(len(ctrl_r1_name)):
                 if ctrl_r1_original_extension[list_counter] == '.fq' or ctrl_r1_original_extension[list_counter] == '.fastq':
 
-                    raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                    raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                         raw_data_dir, 
                         ctrl_name[list_counter]))
 
@@ -1475,7 +1394,7 @@ if start_from_bam == False:
         for list_counter in range(len(chip_r1_name)):
             if chip_r1_original_extension[list_counter] == '.fq' or chip_r1_original_extension[list_counter] == '.fastq':
 
-                raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                     raw_data_dir, 
                     chip_r1_name[list_counter]))
 
@@ -1508,7 +1427,7 @@ if start_from_bam == False:
         for list_counter in range(len(chip_r2_name)):
             if chip_r2_original_extension[list_counter] == '.fq' or chip_r2_original_extension[list_counter] == '.fastq':
 
-                raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                     raw_data_dir, 
                     chip_r2_name[list_counter]))
 
@@ -1542,7 +1461,7 @@ if start_from_bam == False:
             for list_counter in range(len(ctrl_r1_name)):
                 if ctrl_r1_original_extension[list_counter] == '.fq' or ctrl_r1_original_extension[list_counter] == '.fastq':
 
-                    raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                    raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                         raw_data_dir, 
                         ctrl_r1_name[list_counter]))
 
@@ -1575,7 +1494,7 @@ if start_from_bam == False:
             for list_counter in range(len(ctrl_r2_name)):
                 if ctrl_r2_original_extension[list_counter] == '.fq' or ctrl_r2_original_extension[list_counter] == '.fastq':
 
-                    raw_data_script.write('gzip {}/{}.fq &\n'.format(
+                    raw_data_script.write('gzip -f {}/{}.fq &\n'.format(
                         raw_data_dir, 
                         ctrl_r2_name[list_counter]))
 
@@ -1690,7 +1609,7 @@ command_line_file.close() # Closing the file '{dataset_name}_command_line.txt'. 
 
 # Writes the full path of each inputted ChIP and control samples in the pipeline run 
 #   in a tab-separated value file: "{dataset_name}_sample_table.tsv in the output directory"
-#   in ChIP-AP sample table format (see documentation)
+#   in CaRAS sample table format (see documentation)
 
 sample_table_output_df = pd.DataFrame.from_dict(sample_table_output_dict, orient = 'index')
 
@@ -1702,11 +1621,13 @@ sample_table_output_df.to_csv('{}/{}_sample_table.tsv'.format(output_dir, datase
 
 # Writes the flags and argument values for each program calls used in the pipeline run 
 #   in a tab-separated value file: "{dataset_name}_setting_table.tsv in the output directory"
-#   in ChIP-AP setting table format (see documentation)
+#   in CaRAS setting table format (see documentation)
 
 setting_table_output_dict = {'program' : suite_program_list, 'argument' : suite_program_arg}
 
 setting_table_output_df = pd.DataFrame.from_dict(setting_table_output_dict)
+
+setting_table_output_df['argument'] = setting_table_output_df['argument'].apply(lambda x: x.lstrip(' '))
 
 setting_table_output_df.to_csv('{}/{}_setting_table.tsv'.format(output_dir, dataset_name), sep = '\t', index = False)
 
@@ -1792,146 +1713,146 @@ raw_reads_quality_control_script.close() # Closing the script '01_raw_reads_qual
 
 
 
-# ####################################################################################################################
-# ### 02_deduplicating_script.sh
-# ####################################################################################################################
+####################################################################################################################
+### 02_deduplicating_script.sh
+####################################################################################################################
 
-# # Create a directory "02_deduplicating" for the deduplicated sequencing reads, 
-# #   free of optical and tile-edge duplicate reads
-# # Create a script "02_deduplicating_script.sh" within, that calls for duplicates removal program: clumpify.sh
-# # In: filename.fq.gz (output from 00_raw_data.sh)
-# # Out: filename.deduped.fq.gz (input for 02_adapter_trimming_script.sh)
+# Create a directory "02_deduplicating" for the deduplicated sequencing reads, 
+#   free of optical and tile-edge duplicate reads
+# Create a script "02_deduplicating_script.sh" within, that calls for duplicates removal program: clumpify.sh
+# In: filename.fq.gz (output from 00_raw_data.sh)
+# Out: filename.deduped.fq.gz (input for 02_adapter_trimming_script.sh)
 
-# deduplicating_dir = '{}/02_deduplicating'.format(output_dir)
-# deduplicating_script_name = '{}/02_deduplicating_script.sh'.format(deduplicating_dir)
-# if not os.path.exists(deduplicating_dir + '/logs'):
-#     os.makedirs(deduplicating_dir + '/logs')
-# deduplicating_script = open(deduplicating_script_name, 'w')
+deduplicating_dir = '{}/02_deduplicating'.format(output_dir)
+deduplicating_script_name = '{}/02_deduplicating_script.sh'.format(deduplicating_dir)
+if not os.path.exists(deduplicating_dir + '/logs'):
+    os.makedirs(deduplicating_dir + '/logs')
+deduplicating_script = open(deduplicating_script_name, 'w')
 
-# deduplicating_script.write('#!/bin/bash\n\n')
-# deduplicating_script.write('set -euxo pipefail\n\n')
+deduplicating_script.write('#!/bin/bash\n\n')
+deduplicating_script.write('set -euxo pipefail\n\n')
 
-# if start_from_bam == False:
+if start_from_bam == False:
 
-#     # Bash commands to call clumpify.sh to remove optical and tile-edge duplicate reads from the fq.gz files
-#     if read_mode == 'single':
-#         for list_counter in range(len(chip_name)):
-#             deduplicating_script.write('clumpify.sh in={}/{}.fq.gz out={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
-#                 raw_data_dir, 
-#                 chip_name[list_counter], 
-#                 deduplicating_dir, 
-#                 chip_name[list_counter], 
-#                 clumpify_arg, 
-#                 deduplicating_dir, 
-#                 chip_name[list_counter], 
-#                 deduplicating_dir, 
-#                 chip_name[list_counter]))
+    # Bash commands to call clumpify.sh to remove optical and tile-edge duplicate reads from the fq.gz files
+    if read_mode == 'single':
+        for list_counter in range(len(chip_name)):
+            deduplicating_script.write('clumpify.sh in={}/{}.fq.gz out={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
+                raw_data_dir, 
+                chip_name[list_counter], 
+                deduplicating_dir, 
+                chip_name[list_counter], 
+                clumpify_arg, 
+                deduplicating_dir, 
+                chip_name[list_counter], 
+                deduplicating_dir, 
+                chip_name[list_counter]))
 
-#         if args.deltemp:
-#             # Immediately deletes the raw fastq after deduplication
-#             for list_counter in range(len(chip_name)):
-#                 deduplicating_script.write('rm -f {}/{}.fq.gz &\n'.format(
-#                     raw_data_dir, 
-#                     chip_name[list_counter]))
+        if args.deltemp:
+            # Immediately deletes the raw fastq after deduplication
+            for list_counter in range(len(chip_name)):
+                deduplicating_script.write('rm -r -f {}/{}.fq.gz &\n'.format(
+                    raw_data_dir, 
+                    chip_name[list_counter]))
 
 
                     
-#         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-#             for list_counter in range(len(ctrl_name)):
-#                 deduplicating_script.write('clumpify.sh in={}/{}.fq.gz out={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
-#                     raw_data_dir, 
-#                     ctrl_name[list_counter], 
-#                     deduplicating_dir, 
-#                     ctrl_name[list_counter], 
-#                     clumpify_arg, 
-#                     deduplicating_dir, 
-#                     ctrl_name[list_counter], 
-#                     deduplicating_dir, 
-#                     ctrl_name[list_counter]))
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            for list_counter in range(len(ctrl_name)):
+                deduplicating_script.write('clumpify.sh in={}/{}.fq.gz out={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
+                    raw_data_dir, 
+                    ctrl_name[list_counter], 
+                    deduplicating_dir, 
+                    ctrl_name[list_counter], 
+                    clumpify_arg, 
+                    deduplicating_dir, 
+                    ctrl_name[list_counter], 
+                    deduplicating_dir, 
+                    ctrl_name[list_counter]))
 
-#             if args.deltemp:        
-#                 for list_counter in range(len(ctrl_name)):
-#                     deduplicating_script.write('rm -f {}/{}.fq.gz &\n'.format(
-#                         raw_data_dir, 
-#                         ctrl_name[list_counter]))
+            if args.deltemp:        
+                for list_counter in range(len(ctrl_name)):
+                    deduplicating_script.write('rm -r -f {}/{}.fq.gz &\n'.format(
+                        raw_data_dir, 
+                        ctrl_name[list_counter]))
 
-#                     if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
-#                         deduplicating_script.write('\nwait\n\n')
+                    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                        deduplicating_script.write('\nwait\n\n')
                         
 
 
-#     elif read_mode == 'paired':
-#         for list_counter in range(len(chip_name)):
-#             deduplicating_script.write('clumpify.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.deduped.fq.gz out2={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
-#                 raw_data_dir, 
-#                 chip_r1_name[list_counter], 
-#                 raw_data_dir, 
-#                 chip_r2_name[list_counter], 
-#                 deduplicating_dir, 
-#                 chip_r1_name[list_counter], 
-#                 deduplicating_dir, 
-#                 chip_r2_name[list_counter], 
-#                 clumpify_arg, 
-#                 deduplicating_dir, 
-#                 chip_name[list_counter], 
-#                 deduplicating_dir, 
-#                 chip_name[list_counter]))
+    elif read_mode == 'paired':
+        for list_counter in range(len(chip_name)):
+            deduplicating_script.write('clumpify.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.deduped.fq.gz out2={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
+                raw_data_dir, 
+                chip_r1_name[list_counter], 
+                raw_data_dir, 
+                chip_r2_name[list_counter], 
+                deduplicating_dir, 
+                chip_r1_name[list_counter], 
+                deduplicating_dir, 
+                chip_r2_name[list_counter], 
+                clumpify_arg, 
+                deduplicating_dir, 
+                chip_name[list_counter], 
+                deduplicating_dir, 
+                chip_name[list_counter]))
 
-#         if args.deltemp:        
-#             for list_counter in range(len(chip_name)):
-#                 deduplicating_script.write('rm -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
-#                     raw_data_dir, 
-#                     chip_r1_name[list_counter], 
-#                     raw_data_dir, 
-#                     chip_r2_name[list_counter]))
+        if args.deltemp:        
+            for list_counter in range(len(chip_name)):
+                deduplicating_script.write('rm -r -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
+                    raw_data_dir, 
+                    chip_r1_name[list_counter], 
+                    raw_data_dir, 
+                    chip_r2_name[list_counter]))
 
-#                 if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-#                     deduplicating_script.write('\nwait\n\n')
+                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
+                    deduplicating_script.write('\nwait\n\n')
                     
-#         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-#             for list_counter in range(len(ctrl_name)):
-#                 deduplicating_script.write('clumpify.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.deduped.fq.gz out2={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
-#                     raw_data_dir, 
-#                     ctrl_r1_name[list_counter], 
-#                     raw_data_dir, 
-#                     ctrl_r2_name[list_counter], 
-#                     deduplicating_dir, 
-#                     ctrl_r1_name[list_counter], 
-#                     deduplicating_dir, 
-#                     ctrl_r2_name[list_counter], 
-#                     clumpify_arg, 
-#                     deduplicating_dir, 
-#                     ctrl_name[list_counter], 
-#                     deduplicating_dir, 
-#                     ctrl_name[list_counter]))
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            for list_counter in range(len(ctrl_name)):
+                deduplicating_script.write('clumpify.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.deduped.fq.gz out2={}/{}.deduped.fq.gz {} 1>{}/logs/{}.deduplicating.out 2>{}/logs/{}.deduplicating.err\n\n'.format(
+                    raw_data_dir, 
+                    ctrl_r1_name[list_counter], 
+                    raw_data_dir, 
+                    ctrl_r2_name[list_counter], 
+                    deduplicating_dir, 
+                    ctrl_r1_name[list_counter], 
+                    deduplicating_dir, 
+                    ctrl_r2_name[list_counter], 
+                    clumpify_arg, 
+                    deduplicating_dir, 
+                    ctrl_name[list_counter], 
+                    deduplicating_dir, 
+                    ctrl_name[list_counter]))
                     
-#             if args.deltemp:        
-#                 for list_counter in range(len(ctrl_name)):
-#                     deduplicating_script.write('rm -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
-#                         raw_data_dir, 
-#                         ctrl_r1_name[list_counter], 
-#                         raw_data_dir, 
-#                         ctrl_r2_name[list_counter]))
+            if args.deltemp:        
+                for list_counter in range(len(ctrl_name)):
+                    deduplicating_script.write('rm -r -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
+                        raw_data_dir, 
+                        ctrl_r1_name[list_counter], 
+                        raw_data_dir, 
+                        ctrl_r2_name[list_counter]))
 
-#                     if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
-#                         deduplicating_script.write('\nwait\n\n')
+                    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                        deduplicating_script.write('\nwait\n\n')
                         
-# deduplicating_script.close() # Closing the script '02_deduplicating_script.sh'. Flushing the write buffer
+deduplicating_script.close() # Closing the script '02_deduplicating_script.sh'. Flushing the write buffer
 
 
 
 ####################################################################################################################
-### 02_adapter_trimming_script.sh
+### 03_adapter_trimming_script.sh
 ####################################################################################################################
 
-# Create a directory "02_adapter_trimming" for the adapter-trimmed sequencing reads, 
+# Create a directory "03_adapter_trimming" for the adapter-trimmed sequencing reads, 
 #   free of left-flanking adapter sequences 
-# Create a script "02_adapter_trimming_script.sh" within, that calls for adapter sequence trimming program: bbduk.sh
-# In: filename.deduped.fq.gz (output from 02_deduplicating_script.sh)
+# Create a script "03_adapter_trimming_script.sh" within, that calls for adapter sequence trimming program: bbduk.sh
+# In: filename.deduped.fq.gz (output from 03_deduplicating_script.sh)
 # Out: filename.adaptertrimmed.fq.gz (input for 03_quality_trimming_script.sh)
 
-adapter_trimming_dir = '{}/02_adapter_trimming'.format(output_dir)
-adapter_trimming_script_name = '{}/02_adapter_trimming_script.sh'.format(adapter_trimming_dir)
+adapter_trimming_dir = '{}/03_adapter_trimming'.format(output_dir)
+adapter_trimming_script_name = '{}/03_adapter_trimming_script.sh'.format(adapter_trimming_dir)
 if not os.path.exists(adapter_trimming_dir + '/logs'):
     os.makedirs(adapter_trimming_dir + '/logs')
 adapter_trimming_script = open(adapter_trimming_script_name, 'w')
@@ -1944,8 +1865,8 @@ if start_from_bam == False:
     # Bash commands to call clumpify.sh to trim adapter sequences from the left flank of reads in the fq.gz files
     if read_mode == 'single':
         for list_counter in range(len(chip_name)):
-            adapter_trimming_script.write('bbduk.sh in={}/{}.fq.gz out={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
-                raw_data_dir, 
+            adapter_trimming_script.write('bbduk.sh in={}/{}.deduped.fq.gz out={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
+                deduplicating_dir, 
                 chip_name[list_counter], 
                 adapter_trimming_dir, 
                 chip_name[list_counter], 
@@ -1959,8 +1880,8 @@ if start_from_bam == False:
         if args.deltemp:
             # Immediately deletes the deduplicated fastq after adapter trimming
             for list_counter in range(len(chip_name)):
-                adapter_trimming_script.write('rm -f {}/{}.fq.gz &\n'.format(
-                    raw_data_dir, 
+                adapter_trimming_script.write('rm -r -f {}/{}.deduped.fq.gz &\n'.format(
+                    deduplicating_dir, 
                     chip_name[list_counter]))
 
                 if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
@@ -1968,8 +1889,8 @@ if start_from_bam == False:
                     
         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
             for list_counter in range(len(ctrl_name)):
-                adapter_trimming_script.write('bbduk.sh in={}/{}.fq.gz out={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
-                    raw_data_dir, 
+                adapter_trimming_script.write('bbduk.sh in={}/{}.deduped.fq.gz out={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
+                    deduplicating_dir, 
                     ctrl_name[list_counter], 
                     adapter_trimming_dir, 
                     ctrl_name[list_counter], 
@@ -1982,8 +1903,8 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    adapter_trimming_script.write('rm -f {}/{}.fq.gz &\n'.format(
-                        raw_data_dir, 
+                    adapter_trimming_script.write('rm -r -f {}/{}.deduped.fq.gz &\n'.format(
+                        deduplicating_dir, 
                         ctrl_name[list_counter]))
 
                     if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
@@ -1992,10 +1913,10 @@ if start_from_bam == False:
 
     if read_mode == 'paired':
         for list_counter in range(len(chip_name)):
-            adapter_trimming_script.write('bbduk.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.adaptertrimmed.fq.gz out2={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
-                raw_data_dir, 
+            adapter_trimming_script.write('bbduk.sh in={}/{}.deduped.fq.gz in2={}/{}.deduped.fq.gz out={}/{}.adaptertrimmed.fq.gz out2={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
+                deduplicating_dir, 
                 chip_r1_name[list_counter], 
-                raw_data_dir, 
+                deduplicating_dir, 
                 chip_r2_name[list_counter], 
                 adapter_trimming_dir, 
                 chip_r1_name[list_counter], 
@@ -2010,10 +1931,10 @@ if start_from_bam == False:
 
         if args.deltemp:        
             for list_counter in range(len(chip_name)):
-                adapter_trimming_script.write('rm -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
-                    raw_data_dir, 
+                adapter_trimming_script.write('rm -r -f {}/{}.deduped.fq.gz {}/{}.deduped.fq.gz &\n'.format(
+                    deduplicating_dir, 
                     chip_r1_name[list_counter], 
-                    raw_data_dir, 
+                    deduplicating_dir, 
                     chip_r2_name[list_counter]))
 
                 if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
@@ -2021,10 +1942,10 @@ if start_from_bam == False:
 
         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
             for list_counter in range(len(ctrl_name)):
-                adapter_trimming_script.write('bbduk.sh in={}/{}.fq.gz in2={}/{}.fq.gz out={}/{}.adaptertrimmed.fq.gz out2={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
-                    raw_data_dir, 
+                adapter_trimming_script.write('bbduk.sh in={}/{}.deduped.fq.gz in2={}/{}.deduped.fq.gz out={}/{}.adaptertrimmed.fq.gz out2={}/{}.adaptertrimmed.fq.gz ref={}/bbmap/adapters.fa {} overwrite=t 1>{}/logs/{}.adapter_trimming.out 2>{}/logs/{}.adapter_trimming.err\n\n'.format(
+                    deduplicating_dir, 
                     ctrl_r1_name[list_counter], 
-                    raw_data_dir, 
+                    deduplicating_dir, 
                     ctrl_r2_name[list_counter], 
                     adapter_trimming_dir, 
                     ctrl_r1_name[list_counter], 
@@ -2039,32 +1960,32 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    adapter_trimming_script.write('rm -f {}/{}.fq.gz {}/{}.fq.gz &\n'.format(
-                        raw_data_dir, 
+                    adapter_trimming_script.write('rm -r -f {}/{}.deduped.fq.gz {}/{}.deduped.fq.gz &\n'.format(
+                        deduplicating_dir, 
                         ctrl_r1_name[list_counter], 
-                        raw_data_dir, 
+                        deduplicating_dir, 
                         ctrl_r2_name[list_counter]))
 
                     if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
                         adapter_trimming_script.write('\nwait\n\n')
                             
-adapter_trimming_script.close() # Closing the script '02_adapter_trimming_script.sh'. Flushing the write buffer
+adapter_trimming_script.close() # Closing the script '03_adapter_trimming_script.sh'. Flushing the write buffer
 
 
 
 ####################################################################################################################
-### 03_quality_trimming_script.sh
+### 04_quality_trimming_script.sh
 ####################################################################################################################
 
-# Create a directory "03_quality_trimming" for the quality-trimmed sequencing reads, 
+# Create a directory "04_quality_trimming" for the quality-trimmed sequencing reads, 
 #   free of sequence reads with low confidence bases 
-# Create a script "03_quality_trimming_script.sh" within, 
+# Create a script "04_quality_trimming_script.sh" within, 
 #   that calls for phred-score-based quality trimming program: trimmomatic
 # In: filename.adaptertrimmed.fq.gz (output from 02_adapter_trimming_script.sh)
 # Out: filename.qualitytrimmed.fq.gz (input for 06_bwa_mem_aligning_script.sh)
 
-quality_trimming_dir = '{}/03_quality_trimming'.format(output_dir)
-quality_trimming_script_name = '{}/03_quality_trimming_script.sh'.format(quality_trimming_dir)
+quality_trimming_dir = '{}/04_quality_trimming'.format(output_dir)
+quality_trimming_script_name = '{}/04_quality_trimming_script.sh'.format(quality_trimming_dir)
 if not os.path.exists(quality_trimming_dir + '/logs'):
     os.makedirs(quality_trimming_dir + '/logs')
 
@@ -2099,7 +2020,7 @@ if start_from_bam == False:
         if args.deltemp:        
             # Immediately deletes the adapter trimmed fastq after quality trimming
             for list_counter in range(len(chip_name)):
-                quality_trimming_script.write('rm -f {}/{}.adaptertrimmed.fq.gz &\n'.format(
+                quality_trimming_script.write('rm -r -f {}/{}.adaptertrimmed.fq.gz &\n'.format(
                     adapter_trimming_dir, 
                     chip_name[list_counter]))
 
@@ -2123,7 +2044,7 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    quality_trimming_script.write('rm -f {}/{}.adaptertrimmed.fq.gz &\n'.format(
+                    quality_trimming_script.write('rm -r -f {}/{}.adaptertrimmed.fq.gz &\n'.format(
                         adapter_trimming_dir, 
                         ctrl_name[list_counter]))
 
@@ -2159,7 +2080,7 @@ if start_from_bam == False:
 
         if args.deltemp:        
             for list_counter in range(len(chip_name)):
-                quality_trimming_script.write('rm -f {}/{}.adaptertrimmed.fq.gz {}/{}.adaptertrimmed.fq.gz &\n'.format(
+                quality_trimming_script.write('rm -r -f {}/{}.adaptertrimmed.fq.gz {}/{}.adaptertrimmed.fq.gz &\n'.format(
                     adapter_trimming_dir, 
                     chip_r1_name[list_counter], 
                     adapter_trimming_dir, 
@@ -2193,7 +2114,7 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    quality_trimming_script.write('rm -f {}/{}.adaptertrimmed.fq.gz {}/{}.adaptertrimmed.fq.gz &\n'.format(
+                    quality_trimming_script.write('rm -r -f {}/{}.adaptertrimmed.fq.gz {}/{}.adaptertrimmed.fq.gz &\n'.format(
                         adapter_trimming_dir, 
                         ctrl_r1_name[list_counter], 
                         adapter_trimming_dir, 
@@ -2202,111 +2123,7 @@ if start_from_bam == False:
                     if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
                         quality_trimming_script.write('\nwait\n\n')
 
-quality_trimming_script.close() # Closing the script '03_quality_trimming_script.sh'. Flushing the write buffer
-
-
-
-# ####################################################################################################################
-# ### 04_kseq_trimming_script.sh
-# ####################################################################################################################
-
-# # Create a directory "04_kseq_trimming" for the quality control 
-# #   report files of the deduplicated and trimmed sequencing reads
-# # Create a script "04_kseq_trimming_script.sh" within, 
-# #   that calls for sequencing reads QC analysis program: fastqc
-# # In: filename.qualitytrimmed.fq.gz (output from 03_quality_trimming_script.sh)
-# # Out: filename_fastqc.html (Reports. not to be further processed downstreams)
-
-# kseq_trimming_dir = '{}/04_kseq_trimming'.format(output_dir)
-# kseq_trimming_script_name = '{}/04_kseq_trimming_script.sh'.format(kseq_trimming_dir)
-# if not os.path.exists(kseq_trimming_dir + '/logs'):
-#     os.makedirs(kseq_trimming_dir + '/logs')
-# kseq_trimming_script = open(kseq_trimming_script_name, 'w')
-
-# kseq_trimming_script.write('#!/bin/bash\n\n')
-# kseq_trimming_script.write('set -euxo pipefail\n\n')
-
-# if start_from_bam == False:
-
-#     # Bash commands to call fastqc to run quality control analysis on all deduplicated and trimmed fq.gz
-#     if read_mode == 'single':
-#         for list_counter in range(len(chip_name)):
-#             kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                 kseq_full_path,
-#                 quality_trimming_dir, 
-#                 chip_name[list_counter], 
-#                 kseq_trimming_dir, 
-#                 chip_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_name[list_counter]))
-
-#         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-#             for list_counter in range(len(ctrl_name)):
-#                 kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                     kseq_full_path,
-#                     quality_trimming_dir, 
-#                     ctrl_name[list_counter], 
-#                     kseq_trimming_dir, 
-#                     ctrl_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_name[list_counter]))
-
-
-
-#     elif read_mode == 'paired':
-#         for list_counter in range(len(chip_name)):
-#             kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                 kseq_full_path,
-#                 quality_trimming_dir, 
-#                 chip_r1_name[list_counter], 
-#                 kseq_trimming_dir, 
-#                 chip_r1_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_r1_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_r1_name[list_counter]))
-
-#             kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                 kseq_full_path,
-#                 quality_trimming_dir, 
-#                 chip_r2_name[list_counter], 
-#                 kseq_trimming_dir, 
-#                 chip_r2_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_r2_name[list_counter],
-#                 kseq_trimming_dir, 
-#                 chip_r2_name[list_counter]))
-
-#         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-#             for list_counter in range(len(ctrl_name)):
-#                 kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                     kseq_full_path,
-#                     quality_trimming_dir, 
-#                     ctrl_r1_name[list_counter], 
-#                     kseq_trimming_dir, 
-#                     ctrl_r1_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_r1_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_r1_name[list_counter]))
-
-#             for list_counter in range(len(ctrl_name)):
-#                 kseq_trimming_script.write('{} {}/{}.qualitytrimmed.fq.gz 25 {}/{}.kseqtrimmed.fq.gz 1>{}/logs/{}.kseq_trimming.out 2>{}/logs/{}.kseq_trimming.err\n\n'.format(
-#                     kseq_full_path,
-#                     quality_trimming_dir, 
-#                     ctrl_r2_name[list_counter], 
-#                     kseq_trimming_dir, 
-#                     ctrl_r2_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_r2_name[list_counter],
-#                     kseq_trimming_dir, 
-#                     ctrl_r2_name[list_counter]))
-
-# kseq_trimming_script.close() # Closing the script '04_kseq_trimming_script.sh'. Flushing the write buffer
+quality_trimming_script.close() # Closing the script '04_quality_trimming_script.sh'. Flushing the write buffer
 
 
 
@@ -2403,8 +2220,8 @@ preprocessed_reads_quality_control_script.close() # Closing the script '05_prepr
 #   Needs index: unlike .sam files, .bam files needs to be indexed before MAPQ filtering by samtools view
 #       Per version 4.0, samtools index are performed at the end of this step to generate indices for the aligned bam files
 # In: filename.qualitytrimmed.fq.gz (output from 03_quality_trimming_script.sh)
-# Out: filename.aligned.bam (input for 07_MAPQ_filtering_script.sh)
-# Out: filename.aligned.bam.bai (indices for the aligned bam file. Input for 07_MAPQ_filtering_script.sh)
+# Out: filename.mapped.bam (input for 07_MAPQ_filtering_script.sh)
+# Out: filename.mapped.bam.bai (indices for the aligned bam file. Input for 07_MAPQ_filtering_script.sh)
 
 bwa_mem_aligning_dir = '{}/06_bwa_mem_aligning'.format(output_dir)
 bwa_mem_aligning_script_name = '{}/06_bwa_mem_aligning_script.sh'.format(bwa_mem_aligning_dir)
@@ -2452,7 +2269,7 @@ if start_from_bam == False:
         if args.deltemp:        
             # Immediately deletes the quality trimmed fastq after alignment to genome
             for list_counter in range(len(chip_name)):
-                bwa_mem_aligning_script.write('rm -f {}/{}.qualitytrimmed.fq.gz &\n'.format(
+                bwa_mem_aligning_script.write('rm -r -f {}/{}.qualitytrimmed.fq.gz &\n'.format(
                     quality_trimming_dir, 
                     chip_name[list_counter]))
 
@@ -2491,7 +2308,7 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    bwa_mem_aligning_script.write('rm -f {}/{}.qualitytrimmed.fq.gz &\n'.format(
+                    bwa_mem_aligning_script.write('rm -r -f {}/{}.qualitytrimmed.fq.gz &\n'.format(
                         quality_trimming_dir, 
                         ctrl_name[list_counter]))
 
@@ -2536,7 +2353,7 @@ if start_from_bam == False:
 
         if args.deltemp:        
             for list_counter in range(len(chip_name)):
-                bwa_mem_aligning_script.write('rm -f {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz {}/{}.unpaired.fq.gz {}/{}.unpaired.fq.gz &\n'.format(
+                bwa_mem_aligning_script.write('rm -r -f {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz {}/{}.unpaired.fq.gz {}/{}.unpaired.fq.gz &\n'.format(
                     quality_trimming_dir, 
                     chip_r1_name[list_counter], 
                     quality_trimming_dir, 
@@ -2585,7 +2402,7 @@ if start_from_bam == False:
 
             if args.deltemp:        
                 for list_counter in range(len(ctrl_name)):
-                    bwa_mem_aligning_script.write('rm -f {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz {}/{}.unpaired.fq.gz {}/{}.unpaired.fq.gz &\n'.format(
+                    bwa_mem_aligning_script.write('rm -r -f {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz {}/{}.unpaired.fq.gz {}/{}.unpaired.fq.gz &\n'.format(
                         quality_trimming_dir, 
                         ctrl_r1_name[list_counter], 
                         quality_trimming_dir, 
@@ -2602,7 +2419,91 @@ if start_from_bam == False:
 
     # Writing bash commands to generate an index file for all individual .bam files
     for list_counter in range(len(chip_name)):
-        bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.aligned.bam &\n'.format(
+        bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.aligned.bam -bS > {}/{}.mapped.bam &\n'.format(
+            bwa_mem_aligning_dir, 
+            chip_name[list_counter],
+            bwa_mem_aligning_dir, 
+            chip_name[list_counter]))
+
+        if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(chip_name) - 1):
+            bwa_mem_aligning_script.write('\nwait\n\n')
+            
+    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+        for list_counter in range(len(ctrl_name)):
+            bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.aligned.bam -bS > {}/{}.mapped.bam &\n'.format(
+                bwa_mem_aligning_dir, 
+                ctrl_name[list_counter],
+                bwa_mem_aligning_dir, 
+                ctrl_name[list_counter]))
+    
+            if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(ctrl_name) - 1):
+                bwa_mem_aligning_script.write('\nwait\n\n')
+
+    if norm_ref != 'none':
+        for list_counter in range(len(chip_name)):
+            bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.normaligned.bam -bS > {}/{}.normmapped.bam &\n'.format(
+                bwa_mem_aligning_dir, 
+                chip_name[list_counter],
+                bwa_mem_aligning_dir, 
+                chip_name[list_counter]))
+
+            if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(chip_name) - 1):
+                bwa_mem_aligning_script.write('\nwait\n\n')
+                
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            for list_counter in range(len(ctrl_name)):
+                bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.normaligned.bam -bS > {}/{}.normmapped.bam &\n'.format(
+                    bwa_mem_aligning_dir, 
+                    ctrl_name[list_counter],
+                    bwa_mem_aligning_dir, 
+                    ctrl_name[list_counter]))
+        
+                if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(ctrl_name) - 1):
+                    bwa_mem_aligning_script.write('\nwait\n\n')
+
+
+
+    # Writing bash commands to generate an index file for all individual .bam files
+    for list_counter in range(len(chip_name)):
+        bwa_mem_aligning_script.write('rm -r -f {}/{}.aligned.bam &\n'.format(
+            bwa_mem_aligning_dir, 
+            chip_name[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
+            bwa_mem_aligning_script.write('\nwait\n\n')
+            
+    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+        for list_counter in range(len(ctrl_name)):
+            bwa_mem_aligning_script.write('rm -r -f {}/{}.aligned.bam &\n'.format(
+                bwa_mem_aligning_dir, 
+                ctrl_name[list_counter]))
+    
+            if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                bwa_mem_aligning_script.write('\nwait\n\n')
+
+    if norm_ref != 'none':
+        for list_counter in range(len(chip_name)):
+            bwa_mem_aligning_script.write('rm -r -f {}/{}.normaligned.bam &\n'.format(
+                bwa_mem_aligning_dir, 
+                chip_name[list_counter]))
+
+            if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
+                bwa_mem_aligning_script.write('\nwait\n\n')
+                
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            for list_counter in range(len(ctrl_name)):
+                bwa_mem_aligning_script.write('rm -r -f {}/{}.normaligned.bam &\n'.format(
+                    bwa_mem_aligning_dir, 
+                    ctrl_name[list_counter]))
+        
+                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                    bwa_mem_aligning_script.write('\nwait\n\n')
+
+
+
+    # Writing bash commands to generate an index file for all individual .bam files
+    for list_counter in range(len(chip_name)):
+        bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.mapped.bam &\n'.format(
             cpu_count, 
             bwa_mem_aligning_dir, 
             chip_name[list_counter]))
@@ -2612,7 +2513,7 @@ if start_from_bam == False:
             
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         for list_counter in range(len(ctrl_name)):
-            bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.aligned.bam &\n'.format(
+            bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.mapped.bam &\n'.format(
                 cpu_count, 
                 bwa_mem_aligning_dir, 
                 ctrl_name[list_counter]))
@@ -2622,7 +2523,7 @@ if start_from_bam == False:
 
     if norm_ref != 'none':
         for list_counter in range(len(chip_name)):
-            bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normaligned.bam &\n'.format(
+            bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normmapped.bam &\n'.format(
                 cpu_count, 
                 bwa_mem_aligning_dir, 
                 chip_name[list_counter]))
@@ -2632,7 +2533,7 @@ if start_from_bam == False:
                 
         if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
             for list_counter in range(len(ctrl_name)):
-                bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normaligned.bam &\n'.format(
+                bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normmapped.bam &\n'.format(
                     cpu_count, 
                     bwa_mem_aligning_dir, 
                     ctrl_name[list_counter]))
@@ -2651,7 +2552,7 @@ bwa_mem_aligning_script.close() # Closing the script '06_bwa_mem_aligning_script
 # Create a directory "07_MAPQ_filtering" for the filtered reads, free of sequence reads with low alignment confidence
 # Create a script "07_MAPQ_filtering_script.sh" within, that calls for .bam file reading program 
 #   that enables MAPQ score thresholding and removes scaffold chromosomes: samtools view
-# In: filename.aligned.bam (output from 06_bwa_mem_aligning_script.sh)
+# In: filename.mapped.bam (output from 06_bwa_mem_aligning_script.sh)
 # Out: filename.mapqfiltered.bam (input for 08_results_script.sh)
 
 mapq_filtering_dir = '{}/07_MAPQ_filtering'.format(output_dir)
@@ -2667,7 +2568,7 @@ if start_from_bam == False:
 
     # Writing bash commands to filter out all aligned reads with score less than user-determined MAPQ score from the .bam files
     for list_counter in range(len(chip_name)):
-        mapq_filtering_script.write('samtools view {} -@ {} -h -b {}/{}.aligned.bam > {}/{}.mapqfiltered.bam 2> {}/logs/{}.mapqfiltering.err\n\n'.format(
+        mapq_filtering_script.write('samtools view {} -@ {} -h -b {}/{}.mapped.bam > {}/{}.mapqfiltered.bam 2> {}/logs/{}.mapqfiltering.err\n\n'.format(
             samtools_view_arg, 
             cpu_count, 
             bwa_mem_aligning_dir, 
@@ -2680,7 +2581,7 @@ if start_from_bam == False:
     if args.deltemp:        
         # Immediately deletes the aligned bam after MAPQ based filtering
         for list_counter in range(len(chip_name)):
-            mapq_filtering_script.write('rm -f {}/{}.aligned.bam &\n'.format(
+            mapq_filtering_script.write('rm -r -f {}/{}.mapped.bam &\n'.format(
                 bwa_mem_aligning_dir, 
                 chip_name[list_counter]))
 
@@ -2689,7 +2590,7 @@ if start_from_bam == False:
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         for list_counter in range(len(ctrl_name)):
-            mapq_filtering_script.write('samtools view {} -@ {} -h -b {}/{}.aligned.bam > {}/{}.mapqfiltered.bam 2> {}/logs/{}.mapqfiltering.err\n\n'.format(
+            mapq_filtering_script.write('samtools view {} -@ {} -h -b {}/{}.mapped.bam > {}/{}.mapqfiltered.bam 2> {}/logs/{}.mapqfiltering.err\n\n'.format(
                 samtools_view_arg, 
                 cpu_count,
                 bwa_mem_aligning_dir, 
@@ -2701,7 +2602,7 @@ if start_from_bam == False:
 
         if args.deltemp:        
             for list_counter in range(len(ctrl_name)):
-                mapq_filtering_script.write('rm -f {}/{}.aligned.bam &\n'.format(
+                mapq_filtering_script.write('rm -r -f {}/{}.mapped.bam &\n'.format(
                     bwa_mem_aligning_dir, 
                     ctrl_name[list_counter]))
 
@@ -2757,7 +2658,7 @@ if start_from_bam == False:
     if args.deltemp:        
         # Immediately deletes the mapq filtered bam after sorting
         for list_counter in range(len(chip_name)):
-            results_script.write('rm -f {}/{}.mapqfiltered.bam &\n'.format(
+            results_script.write('rm -r -f {}/{}.mapqfiltered.bam &\n'.format(
                 mapq_filtering_dir, 
                 chip_name[list_counter]))
 
@@ -2775,7 +2676,7 @@ if start_from_bam == False:
 
         if args.deltemp:        
             for list_counter in range(len(ctrl_name)):
-                results_script.write('rm -f {}/{}.mapqfiltered.bam &\n'.format(
+                results_script.write('rm -r -f {}/{}.mapqfiltered.bam &\n'.format(
                     mapq_filtering_dir, 
                     ctrl_name[list_counter]))
 
@@ -2834,7 +2735,7 @@ bam_chip_list = ['{}/{}.bam'.format(results_dir, chip_name[list_counter]) for li
 bam_chip_string = ' --bam ' + ' '.join(bam_chip_list)
 
 if norm_ref != 'none':
-    norm_bam_chip_list = ['{}/{}.normaligned.bam'.format(bwa_mem_aligning_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
+    norm_bam_chip_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
     norm_bam_chip_string = ' --norm_bam ' + ' '.join(norm_bam_chip_list)
 
 else:
@@ -2845,7 +2746,7 @@ if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
     bam_ctrl_string = ' ' + ' '.join(bam_ctrl_list)
 
     if norm_ref != 'none':
-        norm_bam_ctrl_list = ['{}/{}.normaligned.bam'.format(bwa_mem_aligning_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
+        norm_bam_ctrl_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
         norm_bam_ctrl_string = ' ' + ' '.join(norm_bam_ctrl_list)
 
     else:
@@ -2879,7 +2780,7 @@ results_script.write('caras_reads_normalizer.py --thread {} {} --make_bam --make
 # if args.deltemp:        
 #     # Immediately deletes the mapq filtered bam after sorting
 #     for list_counter in range(len(chip_name)):
-#         results_script.write('rm -f {}/{}.normalized.bam &\n'.format(
+#         results_script.write('rm -r -f {}/{}.normalized.bam &\n'.format(
 #             mapq_filtering_dir, 
 #             chip_name[list_counter]))
 
@@ -2897,7 +2798,7 @@ results_script.write('caras_reads_normalizer.py --thread {} {} --make_bam --make
 
 #     if args.deltemp:        
 #         for list_counter in range(len(ctrl_name)):
-#             results_script.write('rm -f {}/{}.normalized.bam &\n'.format(
+#             results_script.write('rm -r -f {}/{}.normalized.bam &\n'.format(
 #                 mapq_filtering_dir, 
 #                 ctrl_name[list_counter]))
 
@@ -3264,26 +3165,14 @@ elif read_mode == 'paired':
     macs2_read_mode_arg = ' -f BAMPE'
 
 # Default mode (no flag) is chosen here, which is optimized for transcription factor peak calling.
-# Only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
+# Only when CaRAS is running in narrow peak mode (ChIP protein is a transcription factor)
 if peak_type == 'narrow':
     macs2_peak_type_arg = ''
 
 # Broad peak mode (--broad flag) is chosen here, which is optimized for histone modifier peak calling. 
-# Only when ChIP-AP is running in broad peak mode (ChIP protein is a histone modifier)
+# Only when CaRAS is running in broad peak mode (ChIP protein is a histone modifier)
 elif peak_type == 'broad':
     macs2_peak_type_arg = ' --broad'
-
-
-
-# # Default mode (no flag) is chosen here, which is optimized for transcription factor peak calling.
-# # Only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
-# if peak_type == 'narrow':
-#     macs2_program_arg = 'bdgpeakcall'
-
-# # Broad peak mode (--broad flag) is chosen here, which is optimized for histone modifier peak calling. 
-# # Only when ChIP-AP is running in broad peak mode (ChIP protein is a histone modifier)
-# elif peak_type == 'broad':
-#     macs2_program_arg = 'bdgbroadcall'
 
 
 
@@ -3353,10 +3242,6 @@ macs2_peak_calling_script.close() # Closing the script '11_macs2_peak_calling_sc
 ### 12_gem_peak_calling_script.sh
 ####################################################################################################################
 
-# Write this script only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
-# For broad peaks (histone modifier ChIP protein), this script is replaced by 16_sicer2_peak_calling_script.sh 
-# if peak_type == 'narrow':
-
 # Create a directory "12_gem_peak_calling" for the GEM-called peak list file
 # Create a script "12_gem_peak_calling_script.sh" within, that calls for ChIP-seq peak calling program: GEM
 # There are 4 choices of read distribution that can be used in GEM peak calling. 
@@ -3377,7 +3262,7 @@ gem_peak_calling_script.write('#!/bin/bash\n\n')
 gem_peak_calling_script.write('set -euxo pipefail\n\n')
 
 
-# The -Xmx10G flag is necessary when processing paired-end reads with multiple 
+# The -Xmx100G flag is necessary when processing paired-end reads with multiple 
 #   replicates to give GEM enough memory space to work
 # GEM peak caller utilizes different background signal for peak calling, depending on the experiment type. 
 # Read_Distribution_default.txt is used for general ChIP-seq experiment. 
@@ -3514,12 +3399,12 @@ elif read_mode == 'paired':
     homer_read_mode_arg = ' -sspe'
 
 # -style factor flag and argument are used here which makes HOMER optimized for transcription factor peak calling
-# Only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
+# Only when CaRAS is running in narrow peak mode (ChIP protein is a transcription factor)
 if peak_type == 'narrow':
     homer_peak_type_arg = ' -style factor'
 
 # -style histone flag and argument are used here which makes HOMER optimized for histone modifier peak calling
-# Only when ChIP-AP is running in broad peak mode (ChIP protein is a histone modifier)
+# Only when CaRAS is running in broad peak mode (ChIP protein is a histone modifier)
 elif peak_type == 'broad':
     homer_peak_type_arg = ' -style histone'
 
@@ -3790,16 +3675,15 @@ default_R_directory = which_R_out.decode('utf-8').strip().rstrip('/R')
 
 if analysis_mode == 'bulk':
 
-    seacr_chip_string = ' {}/{}_chip_merged.normalized.bdg'.format(results_dir, dataset_name)
+    seacr_chip_string = ' {}/{}_chip_merged.normalized.normalized.bdg'.format(results_dir, dataset_name)
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        seacr_ctrl_string = ' {}/{}_ctrl_merged.normalized.bdg'.format(results_dir, dataset_name)
+        seacr_ctrl_string = ' {}/{}_ctrl_merged.normalized.normalized.bdg'.format(results_dir, dataset_name)
 
     else:
         seacr_ctrl_string = ' 0.01'
 
-    seacr_peak_calling_script.write('{}{}{}{}{} {}/{} {} 1> {}/logs/{}.SEACR.out 2> {}/logs/{}.SEACR.err\n'.format(
-        seacr_sh_full_path,
+    seacr_peak_calling_script.write('SEACR_1.3.sh{}{}{}{} {}/{} {} 1> {}/logs/{}.SEACR.out 2> {}/logs/{}.SEACR.err\n'.format(
         seacr_chip_string,
         seacr_ctrl_string,
         seacr_arg,
@@ -3815,18 +3699,17 @@ if analysis_mode == 'bulk':
 
 if analysis_mode == 'single_cell':
 
-    seacr_chip_list = [' {}/{}.bdg'.format(results_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
+    seacr_chip_list = [' {}/{}.normalized.normalized.bdg'.format(results_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        seacr_ctrl_list = [' {}/{}.bdg'.format(results_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
+        seacr_ctrl_list = [' {}/{}.normalized.normalized.bdg'.format(results_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
 
     else:
         seacr_ctrl_list = [' 0.01' for list_counter in range(len(chip_name))]
         
 
     for list_counter in range(len(chip_name)):
-        seacr_peak_calling_script.write('{}{}{}{} {} {}/{}_rep{} {} 1> {}/logs/{}_rep{}.SEACR.out 2> {}/logs/{}_rep{}.SEACR.err &\n'.format(
-            seacr_sh_full_path,
+        seacr_peak_calling_script.write('SEACR_1.3.sh{}{}{} {} {}/{}_rep{} {} 1> {}/logs/{}_rep{}.SEACR.out 2> {}/logs/{}_rep{}.SEACR.err &\n'.format(
             seacr_chip_list[list_counter], 
             seacr_ctrl_list[list_counter], 
             seacr_arg,
@@ -3855,7 +3738,7 @@ seacr_peak_calling_script.close() # Closing the script '15_seacr_peak_calling_sc
 ### 16_sicer2_peak_calling_script.sh
 ####################################################################################################################
 
-# Write this script only when ChIP-AP is running in broad peak mode (ChIP protein is a histone modifier)
+# Write this script only when CaRAS is running in broad peak mode (ChIP protein is a histone modifier)
 # For narrow peaks (transcription factor ChIP protein), this script is replaced by 16_sicer2_peak_calling_script.sh 
 
 # Create a directory "16_sicer2_peak_calling" for the SICER2-called peak list file
@@ -3891,11 +3774,12 @@ if analysis_mode == 'bulk':
     else:
         sicer2_ctrl_string = ''
     
+
     sicer2_peak_calling_script.write('sicer{}{} -cpu {} -s {} {} -rt 1000000000 1> {}/logs/{}.SICER2.out 2> {}/logs/{}.SICER2.err\n\n'.format(
         sicer2_chip_string,
         sicer2_ctrl_string,
         cpu_count,
-        genome_ref,
+        'mm10' if genome_ref == 'mm39' else genome_ref,
         sicer2_arg,
         sicer2_dir, 
         dataset_name, 
@@ -3920,7 +3804,7 @@ if analysis_mode == 'single_cell':
             sicer2_chip_list[list_counter],
             sicer2_ctrl_list[list_counter],
             cpu_count,
-            genome_ref,
+            'mm10' if genome_ref == 'mm39' else genome_ref,
             sicer2_arg,
             sicer2_dir, 
             dataset_name, 
@@ -3928,6 +3812,11 @@ if analysis_mode == 'single_cell':
             sicer2_dir, 
             dataset_name,
             (list_counter + 1)))
+
+        sicer2_peak_calling_script.write('rm -rf {}.bed\n\n'.format(sicer2_chip_list[list_counter].lstrip(' -t ').rstrip('.bam')))
+
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            sicer2_peak_calling_script.write('rm -rf {}.bed\n\n'.format(sicer2_ctrl_list[list_counter].lstrip(' -c ').rstrip('.bam')))
 
 
 sicer2_peak_calling_script.write('cd {} \n\n'.format(current_dir))
@@ -3968,7 +3857,7 @@ chromosomes_string = '\|'.join(chromosomes_list)
 
 
 # Bash commands to remove all pre-existing peak caller combination files
-peaks_merging_script.write('rm -rf {}/{}_merged_peaks*\n\n'.format(peaks_merging_dir, dataset_name))
+peaks_merging_script.write('rm -r -f {}/{}_merged_peaks*\n\n'.format(peaks_merging_dir, dataset_name))
 
 
 if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
@@ -3986,9 +3875,7 @@ else:
 
 
 if analysis_mode == 'bulk':
-    # Commands to extract peak locations from peak caller output of MACS2 (narrow peak mode), GEM, HOMER (factor peak mode), and Genrich
-    # Only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
-    # if peak_type == 'narrow':
+
     # Bash commands to reformat MACS2 peak list file (.narrowPeak) into HOMER custom_setting_table format 
     #   and save it as extension-less text file in this folder under the name MACS2 
     peaks_merging_script.write('cat {}/{}_MACS2*_peaks.narrowPeak'.format(macs2_dir, dataset_name)) # Read called peaks list by MACS2
@@ -4070,14 +3957,13 @@ if analysis_mode == 'bulk':
         homer_mergePeaks_arg, 
         dataset_name))
 
-    peaks_merging_script.write('Rscript {} {} venn.txt 1> /dev/null 2> /dev/null\n\n'.format(upset_plot_full_path, dataset_name))
-    # peaks_merging_script.write('Rscript {} {} venn.txt 1> /dev/null 2> /dev/null\n\n'.format(multi_venn_full_path, dataset_name))
+    peaks_merging_script.write('caras_upset_plotter.py --venn {}/venn.txt --prefix {} 1> /dev/null 2> /dev/null\n\n'.format(peaks_merging_dir, dataset_name))
 
 
 
 if analysis_mode == 'single_cell':
     # Commands to extract peak locations from peak caller output of MACS2 (narrow peak mode), GEM, HOMER (factor peak mode), and Genrich
-    # Only when ChIP-AP is running in narrow peak mode (ChIP protein is a transcription factor)
+    # Only when CaRAS is running in narrow peak mode (ChIP protein is a transcription factor)
     for list_counter in range(len(chip_name)):
         # Bash commands to reformat MACS2 peak list file (.narrowPeak) into HOMER custom_setting_table format 
         #   and save it as extension-less text file in this folder under the name MACS2 
@@ -4193,9 +4079,7 @@ if analysis_mode == 'single_cell':
 
 
     for list_counter in range(len(chip_name)):
-        peaks_merging_script.write('Rscript {} rep{} venn_rep{}.txt 1> /dev/null 2> /dev/null\n\n'.format(upset_plot_full_path, (list_counter + 1), (list_counter + 1)))
-        # peaks_merging_script.write('Rscript {} rep{} venn_rep{}.txt 1> /dev/null 2> /dev/null\n\n'.format(multi_venn_full_path, (list_counter + 1), (list_counter + 1)))
-
+        peaks_merging_script.write('caras_upset_plotter.py --venn {}/venn.txt --prefix {}_rep{} 1> /dev/null 2> /dev/null\n\n'.format(peaks_merging_dir, dataset_name, (list_counter + 1)))
 
 
 # Going back to the original directory from which the suite was called, 
@@ -4223,7 +4107,7 @@ peaks_merging_script.close() # Closing the script '21_peaks_merging_script.sh'. 
 
 peaks_processing_dir = '{}/22_peaks_processing'.format(output_dir)
 peaks_processing_script_name = '{}/22_peaks_processing_script.sh'.format(peaks_processing_dir)
-if not os.path.exists(peaks_processing_dir + '/IDR_files'):
+if analysis_mode == 'bulk' and not os.path.exists(peaks_processing_dir + '/IDR_files'):
     os.makedirs(peaks_processing_dir + '/IDR_files')
 peaks_processing_script = open(peaks_processing_script_name, 'w')
 
@@ -4243,12 +4127,12 @@ if analysis_mode == 'bulk':
 
 
     # Bash commands to call HOMER annotatePeaks.pl to append gene annotations to each peak
-    peaks_processing_script.write('annotatePeaks.pl {} {}/{}_all_peaks_concatenated.tsv {} -m {} -nmotifs -go {}/{}_gene_ontology > {}/{}_all_peaks_annotated.tsv\n\n'.format(
+    peaks_processing_script.write('annotatePeaks.pl {} {}/{}_all_peaks_concatenated.tsv {}{} -nmotifs -go {}/{}_gene_ontology > {}/{}_all_peaks_annotated.tsv\n\n'.format(
         homer_annotatePeaks_arg,
         peaks_processing_dir, 
         dataset_name, 
-        genome_ref, 
-        motif_file_full_path,
+        '{}/bwa/{}.fa -gtf {}/annotation/{}.refGene.gtf'.format(genome_dir, genome_ref, genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        ' -m {}'.format(motif_file_full_path) if motif_file_full_path != None else '', 
         peaks_processing_dir, 
         dataset_name, 
         peaks_processing_dir, 
@@ -4454,8 +4338,8 @@ if analysis_mode == 'bulk':
     peaks_processing_script.write('wait\n\n')
 
 
-    # Bash command to run the IDR_integrator.py to integrate the results above into the full peak list dataset_name_all_peaks_calculated.tsv
-    peaks_processing_script.write('IDR_integrator.py --input_tsv {}/{}_all_peaks_calculated.tsv --idr_tsv {}/IDR_files/MACS2_IDR_output.tsv {}/IDR_files/GEM_IDR_output.tsv {}/IDR_files/HOMER_IDR_output.tsv {}/IDR_files/Genrich_IDR_output.tsv {}/IDR_files/SEACR_IDR_output.tsv {}/IDR_files/SICER2_IDR_output.tsv --output_tsv {}/{}_all_peaks_calculated.tsv\n\n'.format(
+    # Bash command to run the caras_IDR_integrator.py to integrate the results above into the full peak list dataset_name_all_peaks_calculated.tsv
+    peaks_processing_script.write('caras_IDR_integrator.py --input_tsv {}/{}_all_peaks_calculated.tsv --idr_tsv {}/IDR_files/MACS2_IDR_output.tsv {}/IDR_files/GEM_IDR_output.tsv {}/IDR_files/HOMER_IDR_output.tsv {}/IDR_files/Genrich_IDR_output.tsv {}/IDR_files/SEACR_IDR_output.tsv {}/IDR_files/SICER2_IDR_output.tsv --output_tsv {}/{}_all_peaks_calculated.tsv\n\n'.format(
         peaks_processing_dir, 
         dataset_name,
         peaks_processing_dir,
@@ -4498,13 +4382,13 @@ if analysis_mode == 'single_cell':
 
     for list_counter in range(len(chip_name)):
         # Bash commands to call HOMER annotatePeaks.pl to append gene annotations to each peak
-        peaks_processing_script.write('annotatePeaks.pl {} {}/{}_rep{}_all_peaks_concatenated.tsv {} -m {} -nmotifs -go {}/{}_rep{}_gene_ontology > {}/{}_rep{}_all_peaks_annotated.tsv \n\n'.format(
+        peaks_processing_script.write('annotatePeaks.pl {} {}/{}_rep{}_all_peaks_concatenated.tsv {}{} -nmotifs -go {}/{}_rep{}_gene_ontology > {}/{}_rep{}_all_peaks_annotated.tsv \n\n'.format(
             homer_annotatePeaks_arg,
             peaks_processing_dir, 
             dataset_name, 
             (list_counter + 1),
-            genome_ref, 
-            motif_file_full_path,
+            '{}/bwa/{}.fa -gtf {}/annotation/{}.refGene.gtf'.format(genome_dir, genome_ref, genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+            ' -m {}'.format(motif_file_full_path) if motif_file_full_path != None else '', 
             peaks_processing_dir, 
             dataset_name, 
             (list_counter + 1),
@@ -4611,180 +4495,6 @@ if analysis_mode == 'single_cell':
                     dataset_name))
 
 
-    for list_counter in range(len(chip_name)):
-
-        # Bash commands to reformat MACS2 peak list file (.narrowPeak) into a ranked list for IDR calculation
-        peaks_processing_script.write('cat {}/{}_rep{}_MACS2_peaks.narrowPeak'.format(macs2_dir, dataset_name, (list_counter + 1))) # Read called peaks list by MACS2
-        peaks_processing_script.write(' | sort -k 7 -n -r') # Run reversed (-r) numerical (-n) sort by the signalValue (column 7), causing the list to start with highest scoring peaks
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest signalValue. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$7}'""") # Get only the chr column ($1), start column ($2), end column ($3), and signalValue column ($7)
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/MACS2_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as MACS2_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-
-        # Bash commands to reformat GEM peak list file (GPS_events.txt) into a ranked list for IDR calculation
-        peaks_processing_script.write('cat {}/{}_rep{}_GEM*GPS_events.txt'.format(gem_dir, dataset_name, (list_counter + 1)))
-        peaks_processing_script.write(' | tail -n +2') # Throw out the headers
-        peaks_processing_script.write(' | sort -k {} -n -r'.format(gem_sorter_column))
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest fold change. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{split($1,a,":"); OFS="\t"; print "chr"a[1],a[2]-150,a[2]+150""") # Get the 1 bp coordinate generated by GEM. Extend it L&R to 50 bp.
-        peaks_processing_script.write(',${}'.format(gem_sorter_column) + "}'")
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/GEM_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as GEM_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-
-        # Bash commands to reformat HOMER peak list file (user-determined filename) into a ranked list for IDR calculation
-        peaks_processing_script.write('cat {}/{}_rep{}_HOMER.peaks'.format(homer_dir, dataset_name, (list_counter + 1)))
-        peaks_processing_script.write(' | tail -n +42') # Throw out the headers
-        peaks_processing_script.write(' | sort -k {} -n -r'.format(homer_sorter_column))
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest fold change. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $2,$3,$4""") # Get only the chr column ($2), start column ($3), end column ($4), and fold change column ($11)
-        peaks_processing_script.write(',${}'.format(homer_sorter_column) + "}'")
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/HOMER_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as HOMER_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-
-        # Bash commands to reformat Genrich peak list file (.narrowPeak) into a ranked list for IDR calculation
-        peaks_processing_script.write('cat {}/{}_rep{}_Genrich.narrowPeak'.format(genrich_dir, dataset_name, (list_counter + 1)))
-        peaks_processing_script.write(' | sort -k 7 -n -r') # Run reversed (-r) numerical (-n) sort by the signalValue (column 7), causing the list to start with highest scoring peaks
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest signalValue. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$7}'""") # Get only the chr column ($1), start column ($2), end column ($3), and signalValue column ($7)
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/Genrich_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as Genrich_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-
-        # Bash commands to reformat SEACR peak list file (.bed) into HOMER custom_setting_table format 
-        #   and save it as extension-less text file in this folder under the name SEACR 
-        peaks_processing_script.write('cat {}/{}_rep{}*.bed'.format(seacr_dir, dataset_name, (list_counter + 1)))
-        peaks_processing_script.write(' | sort -k 4 -n -r') # Run reversed (-r) numerical (-n) sort by the signalValue (column 4), causing the list to start with highest scoring peaks
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest signalValue. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$4}'""") # Get only the chr column ($1), start column ($2), end column ($3), and signalValue column ($4)
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/SEACR_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as SEACR_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-
-        # Bash commands to reformat SICER2 peak list file (*W*G*islands-summary) into a ranked list for IDR calculation 
-        peaks_processing_script.write('cat {}/{}*rep{}*W*G*{}'.format(sicer2_dir, dataset_name, (list_counter + 1), sicer2_peakset_filename))
-        peaks_processing_script.write(' | sort -k {} -n -r'.format(sicer2_sorter_column))
-        peaks_processing_script.write(' | head -200000') # Take the 200,000 peaks with highest fold change. Anomalies happen sometimes where a peak caller calls 1,000,000+ peaks.
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3""") # Get only the chr column ($1), start column ($2), end column ($3), and fold change column ($7)
-        peaks_processing_script.write(',${}'.format(sicer2_sorter_column) + "}'")
-        peaks_processing_script.write(r""" | awk '{OFS="\t";print $1,$2,$3,$1":"$2"-"$3,"0",".",$4,"-1","-1","-1"}'""") # Make it into narrowPeak format
-        peaks_processing_script.write(' > {}/IDR_files/SICER2_rep{}_IDR_input.narrowPeak'.format(peaks_processing_dir, (list_counter + 1))) # Save it as SICER2_IDR_input.narrowPeak
-        peaks_processing_script.write(' &\n')
-        
-        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-            peaks_processing_script.write('\nwait\n\n')
-
-
-    for list_counter in range(len(chip_name)):
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus MACS2 peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/MACS2_rep{}_IDR_input.narrowPeak -o {}/IDR_files/MACS2_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus GEM peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/GEM_rep{}_IDR_input.narrowPeak -o {}/IDR_files/GEM_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus HOMER peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/HOMER_rep{}_IDR_input.narrowPeak -o {}/IDR_files/HOMER_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus Genrich peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/Genrich_rep{}_IDR_input.narrowPeak -o {}/IDR_files/Genrich_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus SEACR peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/SEACR_rep{}_IDR_input.narrowPeak -o {}/IDR_files/SEACR_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        # Bash command to run IDR module to calculate peak IDR based on union peak set versus SICER2 peak set
-        peaks_processing_script.write('idr -s {}/{}_rep{}_all_peaks_calculated.narrowPeak {}/IDR_files/SICER2_rep{}_IDR_input.narrowPeak -o {}/IDR_files/SICER2_rep{}_IDR_output.tsv --input-file-type narrowPeak --rank signal.value --use-nonoverlapping-peaks &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1)))
-
-        peaks_processing_script.write('\nwait\n\n')
-
-
-    for list_counter in range(len(chip_name)):
-
-        # Bash command to run the IDR_integrator.py to integrate the results above into the full peak list dataset_name_all_peaks_calculated.tsv
-        peaks_processing_script.write('IDR_integrator.py --input_tsv {}/{}_rep{}_all_peaks_calculated.tsv --idr_tsv {}/IDR_files/MACS2_rep{}_IDR_output.tsv {}/IDR_files/GEM_rep{}_IDR_output.tsv {}/IDR_files/HOMER_rep{}_IDR_output.tsv {}/IDR_files/Genrich_rep{}_IDR_output.tsv {}/IDR_files/SEACR_rep{}_IDR_output.tsv {}/IDR_files/SICER2_rep{}_IDR_output.tsv --output_tsv {}/{}_rep{}_all_peaks_calculated.tsv\n\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            (list_counter + 1),
-            peaks_processing_dir,
-            dataset_name,
-            (list_counter + 1)))    
-
-
-    for list_counter in range(len(chip_name)):
-
-        # Bash commands to call the home-made script caras_peak_caller_stats_calculator.py to generate 
-        #   a separate summary custom_setting_table file that shows the statistics 
-        #   (tag counts, fold changes, motif hits, motif hits rate, positive peaks rate) 
-        #   of peaks that are called each combination of peak callers
-        peaks_processing_script.write('caras_peak_caller_stats_calculator.py {}/{}_rep{}_all_peaks_calculated.tsv {}/{}_rep{}_peak_caller_combinations_statistics.tsv &\n'.format(
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1), 
-            peaks_processing_dir, 
-            dataset_name,
-            (list_counter + 1)))
-
-        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-            peaks_processing_script.write('\nwait\n\n')
-
-
-
     peaks_processing_script.write('cat {}/{}_rep*all_peaks_concatenated.tsv | cut -f 2,3,4,7 > {}/{}_all_samples_concatenated.tsv\n\n'.format(
         peaks_processing_dir, 
         dataset_name,
@@ -4803,11 +4513,6 @@ if analysis_mode == 'single_cell':
         peaks_processing_dir,
         dataset_name))
 
-    if homer_annotatePeaks_arg != ' ':
-        extractor_annotate_arg = '--annotate_arg {}'.format(homer_annotatePeaks_arg)
-    if homer_annotatePeaks_arg == ' ':
-        extractor_annotate_arg = ''
-
 
     calculated_peaks_list = ['{}/{}_rep{}_all_peaks_calculated.tsv'.format(
         peaks_processing_dir, 
@@ -4820,8 +4525,7 @@ if analysis_mode == 'single_cell':
     calculated_peaks_string = ' '.join(calculated_peaks_list)
     
 
-
-    peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --peaklist_tsv {} --output {} --setname {} --ref {} {} --filter 5 --repnum {} --top_rank 50 --database kegg\n\n'.format(
+    peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --peaklist_tsv {} --output {} --setname {} --ref {} --repnum {} --clustnum {}{}\n\n'.format(
         cpu_count,
         peaks_processing_dir,
         dataset_name,
@@ -4831,117 +4535,10 @@ if analysis_mode == 'single_cell':
         peaks_processing_dir,
         dataset_name,
         genome_ref,
-        extractor_annotate_arg,
-        len(chip_name)))
+        len(chip_name),
+        expected_cluster,
+        peak_feature_extractor_arg))
 
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter MACS2 GEM HOMER Genrich SEACR SICER2 --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter MACS2 --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter GEM --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter HOMER --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter Genrich --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter SEACR --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter SICER2 --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter MACS2+GEM+HOMER+Genrich+SEACR+SICER2 --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
-
-    # peaks_processing_script.write('caras_peak_feature_extractor.py --thread {} --interval_bed {}/{}_all_samples_merged_intervals.tsv --input_tsv {}/{}_all_samples_concatenated.tsv --output {} --setname {} --ref {} {} --filter MACS2-GEM-HOMER-Genrich-SEACR-SICER2 --repnum {} --top_rank 50 --database kegg\n\n'.format(
-    #     cpu_count,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     peaks_processing_dir,
-    #     dataset_name,
-    #     genome_ref,
-    #     extractor_annotate_arg,
-    #     len(chip_name)))
         
 peaks_processing_script.close() # Closing the script '22_peaks_processing_script.sh'. Flushing the write buffer
 
@@ -5125,9 +4722,9 @@ if not os.path.exists(homer_motif_enrichment_dir + '/logs'):
 #   selecting the 6_overlap, 1_overlap, or both peak sets, and save them in this folder as inputs for HOMER findMotifsGenome.pl
 # This script also calls for motif enrichment analysis program: HOMER findMotifsGenome.pl
 #   that performs motif enrichment analysis to find the most potential protein-DNA binding motifs based on:
-#       6_overlap peak set if "6_overlap" is given as an argument for --homer_motif flag in ChIP-AP command line
-#       1_overlap peak set if "1_overlap" is given as an argument for --homer_motif_flag in ChIP-AP command line
-#       Both 6_overlap and 1_overlap peak set if "both" is given as an argument for --homer_motif_flag in ChIP-AP command line
+#       6_overlap peak set if "6_overlap" is given as an argument for --homer_motif flag in CaRAS command line
+#       1_overlap peak set if "1_overlap" is given as an argument for --homer_motif_flag in CaRAS command line
+#       Both 6_overlap and 1_overlap peak set if "both" is given as an argument for --homer_motif_flag in CaRAS command line
 # In: setname_all_peaks_calculated.tsv (input from 22_peaks_processing_script.sh)
 # Out: homerResults.html and knownResults.html (all the individual enriched motifs can be accessed through these .html files)
 
@@ -5137,27 +4734,54 @@ homer_motif_enrichment_1_overlap_script = open(homer_motif_enrichment_1_overlap_
 homer_motif_enrichment_1_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_1_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_1_overlap_dir = '{}/24_homer_motif_enrichment/1_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_1_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_1_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_1_overlap_dir = '{}/24_homer_motif_enrichment/1_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_1_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_1_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_1_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_1_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 1'""") # Get only the peaks with peak caller overlaps ($7) with 1 or more overlaps (union) 
-homer_motif_enrichment_1_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_1_overlap_script.write(' > {}/1_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_1_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_1_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_1_overlap_script.write(r""" | awk '$7 >= 1'""") # Get only the peaks with peak caller overlaps ($7) with 1 or more overlaps (union) 
+    homer_motif_enrichment_1_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_1_overlap_script.write(' > {}/1_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_1_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 1_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_1_overlap_script.write('findMotifsGenome.pl {}/1_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_1_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_1_overlap.err\n\n'.format(
-    homer_motif_enrichment_1_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_1_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 1_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_1_overlap_script.write('findMotifsGenome.pl {}/1_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_1_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_1_overlap.err\n\n'.format(
+        homer_motif_enrichment_1_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_1_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
+if analysis_mode == 'single_cell':
+    homer_motif_enrichment_1_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_1_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_1_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_1_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_1_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
 
+    homer_motif_enrichment_1_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_1_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_1_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_1_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_1_overlap_script.write(r""" | awk '\$7 >= 1'""")
+    homer_motif_enrichment_1_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_1_overlap_script.write(" > {}/{{}}_1_overlap/1_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_1_overlap_script.write("find {} -name '1_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/1_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_1_overlap_script.close() # Closing the script 'homer_motif_enrichment_1_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5166,27 +4790,54 @@ homer_motif_enrichment_2_overlap_script = open(homer_motif_enrichment_2_overlap_
 homer_motif_enrichment_2_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_2_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_2_overlap_dir = '{}/24_homer_motif_enrichment/2_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_2_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_2_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_2_overlap_dir = '{}/24_homer_motif_enrichment/2_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_2_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_2_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_2_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_2_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 2'""") # Get only the peaks with peak caller overlaps ($7) with 2 or more overlaps
-homer_motif_enrichment_2_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_2_overlap_script.write(' > {}/2_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_2_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_2_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_2_overlap_script.write(r""" | awk '$7 >= 2'""") # Get only the peaks with peak caller overlaps ($7) with 2 or more overlaps
+    homer_motif_enrichment_2_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_2_overlap_script.write(' > {}/2_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_2_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 2_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_2_overlap_script.write('findMotifsGenome.pl {}/2_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_2_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_2_overlap.err\n\n'.format(
-    homer_motif_enrichment_2_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_2_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 2_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_2_overlap_script.write('findMotifsGenome.pl {}/2_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_2_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_2_overlap.err\n\n'.format(
+        homer_motif_enrichment_2_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_2_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
 
+if analysis_mode == 'single_cell':
+    homer_motif_enrichment_2_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_2_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_2_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_2_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_2_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
+
+    homer_motif_enrichment_2_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_2_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_2_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_2_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_2_overlap_script.write(r""" | awk '\$7 >= 2'""")
+    homer_motif_enrichment_2_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_2_overlap_script.write(" > {}/{{}}_2_overlap/2_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_2_overlap_script.write("find {} -name '2_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/2_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_2_overlap_script.close() # Closing the script 'homer_motif_enrichment_2_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5195,27 +4846,54 @@ homer_motif_enrichment_3_overlap_script = open(homer_motif_enrichment_3_overlap_
 homer_motif_enrichment_3_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_3_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_3_overlap_dir = '{}/24_homer_motif_enrichment/3_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_3_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_3_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_3_overlap_dir = '{}/24_homer_motif_enrichment/3_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_3_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_3_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_3_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_3_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 3'""") # Get only the peaks with peak caller overlaps ($7) with 3 or more overlaps
-homer_motif_enrichment_3_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_3_overlap_script.write(' > {}/3_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_3_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_3_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_3_overlap_script.write(r""" | awk '$7 >= 3'""") # Get only the peaks with peak caller overlaps ($7) with 3 or more overlaps
+    homer_motif_enrichment_3_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_3_overlap_script.write(' > {}/3_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_3_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 3_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_3_overlap_script.write('findMotifsGenome.pl {}/3_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_3_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_3_overlap.err\n\n'.format(
-    homer_motif_enrichment_3_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_3_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 3_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_3_overlap_script.write('findMotifsGenome.pl {}/3_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_3_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_3_overlap.err\n\n'.format(
+        homer_motif_enrichment_3_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_3_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
 
+if analysis_mode == 'single_cell':
+    homer_motif_enrichment_3_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_3_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_3_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_3_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_3_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
+
+    homer_motif_enrichment_3_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_3_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_3_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_3_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_3_overlap_script.write(r""" | awk '\$7 >= 3'""")
+    homer_motif_enrichment_3_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_3_overlap_script.write(" > {}/{{}}_3_overlap/3_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_3_overlap_script.write("find {} -name '3_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/3_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_3_overlap_script.close() # Closing the script 'homer_motif_enrichment_3_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5224,27 +4902,54 @@ homer_motif_enrichment_4_overlap_script = open(homer_motif_enrichment_4_overlap_
 homer_motif_enrichment_4_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_4_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_4_overlap_dir = '{}/24_homer_motif_enrichment/4_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_4_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_4_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_4_overlap_dir = '{}/24_homer_motif_enrichment/4_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_4_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_4_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_4_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_4_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 4'""") # Get only the peaks with peak caller overlaps ($7) with 4 or more overlaps
-homer_motif_enrichment_4_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_4_overlap_script.write(' > {}/4_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_4_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_4_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_4_overlap_script.write(r""" | awk '$7 >= 4'""") # Get only the peaks with peak caller overlaps ($7) with 4 or more overlaps
+    homer_motif_enrichment_4_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_4_overlap_script.write(' > {}/4_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_4_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 4_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_4_overlap_script.write('findMotifsGenome.pl {}/4_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_4_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_4_overlap.err\n\n'.format(
-    homer_motif_enrichment_4_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_4_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 4_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_4_overlap_script.write('findMotifsGenome.pl {}/4_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_4_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_4_overlap.err\n\n'.format(
+        homer_motif_enrichment_4_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_4_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
 
+if analysis_mode == 'single_cell':
+    homer_motif_enrichment_4_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_4_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_4_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_4_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_4_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
+
+    homer_motif_enrichment_4_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_4_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_4_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_4_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_4_overlap_script.write(r""" | awk '\$7 >= 4'""")
+    homer_motif_enrichment_4_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_4_overlap_script.write(" > {}/{{}}_4_overlap/4_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_4_overlap_script.write("find {} -name '4_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/4_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_4_overlap_script.close() # Closing the script 'homer_motif_enrichment_4_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5253,27 +4958,55 @@ homer_motif_enrichment_5_overlap_script = open(homer_motif_enrichment_5_overlap_
 homer_motif_enrichment_5_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_5_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_5_overlap_dir = '{}/24_homer_motif_enrichment/5_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_5_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_5_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_5_overlap_dir = '{}/24_homer_motif_enrichment/5_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_5_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_5_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_5_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_5_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 5'""") # Get only the peaks with peak caller overlaps ($7) with 5 or more overlaps
-homer_motif_enrichment_5_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_5_overlap_script.write(' > {}/5_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_5_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_5_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_5_overlap_script.write(r""" | awk '$7 >= 5'""") # Get only the peaks with peak caller overlaps ($7) with 5 or more overlaps
+    homer_motif_enrichment_5_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_5_overlap_script.write(' > {}/5_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_5_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 5_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_5_overlap_script.write('findMotifsGenome.pl {}/5_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_5_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_5_overlap.err\n\n'.format(
-    homer_motif_enrichment_5_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_5_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 5_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_5_overlap_script.write('findMotifsGenome.pl {}/5_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_5_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_5_overlap.err\n\n'.format(
+        homer_motif_enrichment_5_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_5_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
 
+if analysis_mode == 'single_cell':
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 5_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_5_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_5_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_5_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_5_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_5_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
+
+    homer_motif_enrichment_5_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_5_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_5_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_5_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_5_overlap_script.write(r""" | awk '\$7 >= 5'""")
+    homer_motif_enrichment_5_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_5_overlap_script.write(" > {}/{{}}_5_overlap/5_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_5_overlap_script.write("find {} -name '5_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/5_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_5_overlap_script.close() # Closing the script 'homer_motif_enrichment_5_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5282,27 +5015,55 @@ homer_motif_enrichment_6_overlap_script = open(homer_motif_enrichment_6_overlap_
 homer_motif_enrichment_6_overlap_script.write('#!/bin/bash\n\n')
 homer_motif_enrichment_6_overlap_script.write('set -euxo pipefail\n\n')
 
-homer_motif_enrichment_6_overlap_dir = '{}/24_homer_motif_enrichment/6_overlap_peak_set'.format(output_dir)
-homer_motif_enrichment_6_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_6_overlap_dir))
+if analysis_mode == 'bulk':
+    homer_motif_enrichment_6_overlap_dir = '{}/24_homer_motif_enrichment/6_overlap_peak_set'.format(output_dir)
+    homer_motif_enrichment_6_overlap_script.write('mkdir -p {}\n\n'.format(homer_motif_enrichment_6_overlap_dir))
 
-# Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
-homer_motif_enrichment_6_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
-homer_motif_enrichment_6_overlap_script.write(r""" | awk 'NR == 1 ; $7 >= 6'""") # Get only the 6_overlap peaks (peaks with peak caller overlaps ($7) = 6) 
-homer_motif_enrichment_6_overlap_script.write(r""" | awk 'BEGIN{FS = "\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
-homer_motif_enrichment_6_overlap_script.write(' > {}/6_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_6_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
+    # Bash commands to reformat Genrich peak list file (.narrowPeak) into HOMER custom_setting_table format
+    homer_motif_enrichment_6_overlap_script.write('cat {}/{}_all_peaks_calculated.tsv'.format(peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_6_overlap_script.write(r""" | awk '$7 >= 6'""") # Get only the 6_overlap peaks (peaks with peak caller overlaps ($7) = 6) 
+    homer_motif_enrichment_6_overlap_script.write(r""" | awk 'BEGIN{fs="\t"}{OFS="\t";print $1,$2,$3,$4,$5}'""") # Get only the unique peak ID ($1), chr ($2), start ($3), end ($4), and strand columns ($5) 
+    homer_motif_enrichment_6_overlap_script.write(' > {}/6_overlap_peaks.tsv\n\n'.format(homer_motif_enrichment_6_overlap_dir)) # Save it, as an input peak list for HOMER findMotifsGenome.pl
 
-# Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on ChIP-AP 6_overlap peak set. One command, one run for every one replicate.
-homer_motif_enrichment_6_overlap_script.write('findMotifsGenome.pl {}/6_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_6_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_6_overlap.err\n\n'.format(
-    homer_motif_enrichment_6_overlap_dir,
-    genome_ref, 
-    homer_motif_enrichment_6_overlap_dir, 
-    cpu_count,
-    homer_findMotifsGenome_arg,
-    homer_motif_enrichment_dir,
-    dataset_name,
-    homer_motif_enrichment_dir,
-    dataset_name))
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 6_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_6_overlap_script.write('findMotifsGenome.pl {}/6_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_6_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_6_overlap.err\n\n'.format(
+        homer_motif_enrichment_6_overlap_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_6_overlap_dir, 
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
 
+if analysis_mode == 'single_cell':
+    # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 6_overlap peak set. One command, one run for every one replicate.
+    homer_motif_enrichment_6_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_6_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_6_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_6_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_6_overlap\"\n\n".format(cpu_count, homer_motif_enrichment_dir))
+
+    homer_motif_enrichment_6_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    homer_motif_enrichment_6_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    homer_motif_enrichment_6_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    homer_motif_enrichment_6_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    homer_motif_enrichment_6_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    homer_motif_enrichment_6_overlap_script.write(r""" | awk 'BEGIN{FS="'"\t"'"}{OFS="'"\t"'";print \$1,\$2,\$3,\$4,\$5}'""")
+    homer_motif_enrichment_6_overlap_script.write(" > {}/{{}}_6_overlap/6_overlap_peaks.tsv\"\n\n".format(homer_motif_enrichment_dir))
+                                                  
+    homer_motif_enrichment_6_overlap_script.write("find {} -name '6_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/6_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
+        homer_motif_enrichment_dir,
+        homer_motif_enrichment_dir,
+        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        homer_motif_enrichment_dir,
+        cpu_count,
+        homer_findMotifsGenome_arg,
+        homer_motif_enrichment_dir,
+        dataset_name,
+        homer_motif_enrichment_dir,
+        dataset_name))
+    
 homer_motif_enrichment_6_overlap_script.close() # Closing the script 'homer_motif_enrichment_6_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5327,65 +5088,110 @@ if not os.path.exists(meme_motif_enrichment_dir + '/logs'):
 #   based on the peak coordinates in the processed peak list, and save them in this folder as inputs for meme-chip
 # This script also calls for motif enrichment analysis program: meme-chip
 #   that performs motif enrichment analysis to find the most potential protein-DNA binding motifs based on:
-#       6_overlap peak set if "6_overlap" is given as an argument for --meme_motif flag in ChIP-AP command line
-#       1_overlap peak set if "1_overlap" is given as an argument for --meme_motif_flag in ChIP-AP command line
-#       Both 6_overlap and 1_overlap peak set if "both" is given as an argument for --meme_motif_flag in ChIP-AP command line
+#       6_overlap peak set if "6_overlap" is given as an argument for --meme_motif flag in CaRAS command line
+#       1_overlap peak set if "1_overlap" is given as an argument for --meme_motif_flag in CaRAS command line
+#       Both 6_overlap and 1_overlap peak set if "both" is given as an argument for --meme_motif_flag in CaRAS command line
 # In: setname_all_peaks_calculated.tsv (input from 22_peaks_processing_script.sh)
 # Out: meme-chip.html (all the enriched motifs and modular analysis results can be accessed through this .html file)
-
-
-# Put _rep[#] behind the file or folder name when there are going to be multi-replicated results from multi-replicated meme-chip runs
-if len(chip_name) == 1:
-    fasta_suffix_list = ['']
-elif len(chip_name) > 1:
-    fasta_suffix_list = ['_rep{}'.format(list_counter + 1) for list_counter in range(len(chip_name))]
 
 if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
     meme_sequence_extractor_background_arg = ' --background'
 else:
-    meme_sequence_extractor_background_arg = ' --background'
+    meme_sequence_extractor_background_arg = ''
+
+if analysis_mode == 'bulk':
+    # Put _rep[#] behind the file or folder name when there are going to be multi-replicated results from multi-replicated meme-chip runs
+    if len(chip_name) == 1:
+        fasta_suffix_list = ['']
+    elif len(chip_name) > 1:
+        if force_merge == 1:
+            fasta_suffix_list = ['']
+        elif force_merge == 0:
+            fasta_suffix_list = ['_rep{}'.format(list_counter + 1) for list_counter in range(len(chip_name))]
+
+if analysis_mode == 'single_cell':
+    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+        meme_chip_background_arg = ' -neg {}/{{}}/background.fa'.format(meme_motif_enrichment_dir)
+    else:
+        meme_chip_background_arg = ''
 
 meme_motif_enrichment_1_overlap_script_name = '{}/25_meme_motif_enrichment_1_overlap_script.sh'.format(meme_motif_enrichment_dir)
 meme_motif_enrichment_1_overlap_script = open(meme_motif_enrichment_1_overlap_script_name, 'w')
 meme_motif_enrichment_1_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_1_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_1_overlap_dir = '{}/25_meme_motif_enrichment/1_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_1_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_1_overlap_dir))
+if analysis_mode == 'bulk':        
+    meme_motif_enrichment_1_overlap_dir = '{}/25_meme_motif_enrichment/1_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_1_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_1_overlap_dir))
 
-meme_motif_enrichment_1_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 1\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_1_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
-
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 1_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
-    
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_1_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_1_overlap_dir, fasta_suffix_list[list_counter])
-    
-    meme_motif_enrichment_1_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_1_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_1_overlap{}.err &\n'.format(
+    meme_motif_enrichment_1_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 1\n\n'.format(
+        peaks_processing_dir,
+        dataset_name,
+        genome_dir,
+        genome_dir,
         meme_motif_enrichment_1_overlap_dir,
-        fasta_suffix_list[list_counter],
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 1_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
+
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_1_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
+
+        meme_motif_enrichment_1_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_1_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_1_overlap{}.err &\n'.format(
+            meme_motif_enrichment_1_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_1_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_1_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_1_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_1_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_1_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_1_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_1_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_1_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_1_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_1_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_1_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_1_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_1_overlap_script.write(" > {}/{{}}_1_overlap/1_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_1_overlap_script.write("find {} -name '1_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/1_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_1_overlap_script.write("find {} -name '1_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_1_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_1_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_1_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_1_overlap_script.write('\nwait\n\n')
-
+        dataset_name))
+    
 meme_motif_enrichment_1_overlap_script.close() # Closing the script 'meme_motif_enrichment_1_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5394,42 +5200,77 @@ meme_motif_enrichment_2_overlap_script = open(meme_motif_enrichment_2_overlap_sc
 meme_motif_enrichment_2_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_2_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_2_overlap_dir = '{}/25_meme_motif_enrichment/2_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_2_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_2_overlap_dir))
+if analysis_mode == 'bulk':        
+    meme_motif_enrichment_2_overlap_dir = '{}/25_meme_motif_enrichment/2_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_2_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_2_overlap_dir))
 
-meme_motif_enrichment_2_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 2\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_2_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
+    meme_motif_enrichment_2_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 2\n\n'.format(peaks_processing_dir,
+                                    dataset_name,
+                                    genome_dir,
+                                    genome_dir,
+                                    meme_motif_enrichment_2_overlap_dir,
+                                    genome_ref,
+                                    meme_sequence_extractor_background_arg))
 
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 2_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 2_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
 
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_2_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_2_overlap_dir, fasta_suffix_list[list_counter])
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_2_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
 
-    meme_motif_enrichment_2_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_2_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_2_overlap{}.err &\n'.format(
-        meme_motif_enrichment_2_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_2_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_2_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_2_overlap{}.err &\n'.format(
+            meme_motif_enrichment_2_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_2_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_2_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_2_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_2_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_2_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_2_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_2_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_2_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_2_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_2_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_2_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_2_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_2_overlap_script.write(" > {}/{{}}_2_overlap/2_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_2_overlap_script.write("find {} -name '2_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/2_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_2_overlap_script.write("find {} -name '2_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_2_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_2_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_2_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_2_overlap_script.write('\nwait\n\n')
-
+        dataset_name))
+    
 meme_motif_enrichment_2_overlap_script.close() # Closing the script 'meme_motif_enrichment_2_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5438,42 +5279,77 @@ meme_motif_enrichment_3_overlap_script = open(meme_motif_enrichment_3_overlap_sc
 meme_motif_enrichment_3_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_3_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_3_overlap_dir = '{}/25_meme_motif_enrichment/3_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_3_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_3_overlap_dir))
+if analysis_mode == 'bulk':
+    meme_motif_enrichment_3_overlap_dir = '{}/25_meme_motif_enrichment/3_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_3_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_3_overlap_dir))
 
-meme_motif_enrichment_3_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 3\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_3_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
+    meme_motif_enrichment_3_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 3\n\n'.format(peaks_processing_dir,
+                                    dataset_name,
+                                    genome_dir,
+                                    genome_dir,
+                                    meme_motif_enrichment_3_overlap_dir,
+                                    genome_ref,
+                                    meme_sequence_extractor_background_arg))
 
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 3_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 3_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
 
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_3_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_3_overlap_dir, fasta_suffix_list[list_counter])
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_3_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
 
-    meme_motif_enrichment_3_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_3_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_3_overlap{}.err &\n'.format(
-        meme_motif_enrichment_3_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_3_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_3_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_3_overlap{}.err &\n'.format(
+            meme_motif_enrichment_3_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_3_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_3_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_3_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_3_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_3_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_3_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_3_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_3_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_3_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_3_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_3_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_3_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_3_overlap_script.write(" > {}/{{}}_3_overlap/3_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_3_overlap_script.write("find {} -name '3_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/3_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_3_overlap_script.write("find {} -name '3_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_3_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_3_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_3_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_3_overlap_script.write('\nwait\n\n')
-
+        dataset_name))
+    
 meme_motif_enrichment_3_overlap_script.close() # Closing the script 'meme_motif_enrichment_3_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5482,42 +5358,77 @@ meme_motif_enrichment_4_overlap_script = open(meme_motif_enrichment_4_overlap_sc
 meme_motif_enrichment_4_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_4_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_4_overlap_dir = '{}/25_meme_motif_enrichment/4_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_4_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_4_overlap_dir))
+if analysis_mode == 'bulk':
+    meme_motif_enrichment_4_overlap_dir = '{}/25_meme_motif_enrichment/4_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_4_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_4_overlap_dir))
 
-meme_motif_enrichment_4_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 4\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_4_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
+    meme_motif_enrichment_4_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 4\n\n'.format(peaks_processing_dir,
+                                    dataset_name,
+                                    genome_dir,
+                                    genome_dir,
+                                    meme_motif_enrichment_4_overlap_dir,
+                                    genome_ref,
+                                    meme_sequence_extractor_background_arg))
 
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 4_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 4_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
 
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_4_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_4_overlap_dir, fasta_suffix_list[list_counter])
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_4_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
 
-    meme_motif_enrichment_4_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_4_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_4_overlap{}.err &\n'.format(
-        meme_motif_enrichment_4_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_4_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_4_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_4_overlap{}.err &\n'.format(
+            meme_motif_enrichment_4_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_4_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_4_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_4_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_4_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_4_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_4_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_4_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_4_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_4_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_4_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_4_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_4_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_4_overlap_script.write(" > {}/{{}}_4_overlap/4_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_4_overlap_script.write("find {} -name '4_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/4_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_4_overlap_script.write("find {} -name '4_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_4_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_4_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_4_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_4_overlap_script.write('\nwait\n\n')
-        
+        dataset_name))
+    
 meme_motif_enrichment_4_overlap_script.close() # Closing the script 'meme_motif_enrichment_4_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5526,42 +5437,77 @@ meme_motif_enrichment_5_overlap_script = open(meme_motif_enrichment_5_overlap_sc
 meme_motif_enrichment_5_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_5_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_5_overlap_dir = '{}/25_meme_motif_enrichment/5_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_5_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_5_overlap_dir))
+if analysis_mode == 'bulk':
+    meme_motif_enrichment_5_overlap_dir = '{}/25_meme_motif_enrichment/5_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_5_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_5_overlap_dir))
 
-meme_motif_enrichment_5_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 5\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_5_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
+    meme_motif_enrichment_5_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 5\n\n'.format(peaks_processing_dir,
+                                    dataset_name,
+                                    genome_dir,
+                                    genome_dir,
+                                    meme_motif_enrichment_5_overlap_dir,
+                                    genome_ref,
+                                    meme_sequence_extractor_background_arg))
 
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 5_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 5_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
 
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_5_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_5_overlap_dir, fasta_suffix_list[list_counter])
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_5_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
 
-    meme_motif_enrichment_5_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_5_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_5_overlap{}.err &\n'.format(
-        meme_motif_enrichment_5_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_5_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_5_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_5_overlap{}.err &\n'.format(
+            meme_motif_enrichment_5_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_5_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_5_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_5_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_5_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_5_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_5_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_5_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_5_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_5_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_5_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_5_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_5_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_5_overlap_script.write(" > {}/{{}}_5_overlap/5_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_5_overlap_script.write("find {} -name '5_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/5_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_5_overlap_script.write("find {} -name '5_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_5_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_5_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_5_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_5_overlap_script.write('\nwait\n\n')
-        
+        dataset_name))
+    
 meme_motif_enrichment_5_overlap_script.close() # Closing the script 'meme_motif_enrichment_5_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5570,42 +5516,77 @@ meme_motif_enrichment_6_overlap_script = open(meme_motif_enrichment_6_overlap_sc
 meme_motif_enrichment_6_overlap_script.write('#!/bin/bash\n\n')
 meme_motif_enrichment_6_overlap_script.write('set -euxo pipefail\n\n')
 
-meme_motif_enrichment_6_overlap_dir = '{}/25_meme_motif_enrichment/6_overlap_peak_set'.format(output_dir)
-meme_motif_enrichment_6_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_6_overlap_dir))
+if analysis_mode == 'bulk':
+    meme_motif_enrichment_6_overlap_dir = '{}/25_meme_motif_enrichment/6_overlap_peak_set'.format(output_dir)
+    meme_motif_enrichment_6_overlap_script.write('mkdir -p {}\n\n'.format(meme_motif_enrichment_6_overlap_dir))
 
-meme_motif_enrichment_6_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 6\n\n'.format(peaks_processing_dir,
-                                dataset_name,
-                                genome_dir,
-                                genome_dir,
-                                meme_motif_enrichment_6_overlap_dir,
-                                genome_ref,
-                                meme_sequence_extractor_background_arg))
+    meme_motif_enrichment_6_overlap_script.write('caras_meme_sequence_extractor.py --input {}/{}_all_peaks_calculated.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {} --ref {}{} --filter 6\n\n'.format(peaks_processing_dir,
+                                    dataset_name,
+                                    genome_dir,
+                                    genome_dir,
+                                    meme_motif_enrichment_6_overlap_dir,
+                                    genome_ref,
+                                    meme_sequence_extractor_background_arg))
 
-# Bash commands to call meme-chip to perform motif enrichment analysis based on ChIP-AP 6_overlap peak set. One command, one run for every one replicate.
-for list_counter in range(len(fasta_suffix_list)):
+    # Bash commands to call meme-chip to perform motif enrichment analysis based on CaRAS 6_overlap peak set. One command, one run for every one replicate.
+    for list_counter in range(len(fasta_suffix_list)):
 
-    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_6_overlap_dir, fasta_suffix_list[list_counter])
-    else:
-        meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_6_overlap_dir, fasta_suffix_list[list_counter])
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            meme_chip_background_arg = ' -neg {}/background{}.fa'.format(meme_motif_enrichment_6_overlap_dir, fasta_suffix_list[list_counter])
+        else:
+            meme_chip_background_arg = ''
 
-    meme_motif_enrichment_6_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_6_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_6_overlap{}.err &\n'.format(
-        meme_motif_enrichment_6_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_6_overlap_script.write('meme-chip -oc {}/motif_analysis{}{} {} {}/target{}.fa 1> {}/logs/{}.MEMEmotifenrichment_6_overlap{}.out 2> {}/logs/{}.MEMEmotifenrichment_6_overlap{}.err &\n'.format(
+            meme_motif_enrichment_6_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_chip_background_arg,
+            meme_chip_arg,
+            meme_motif_enrichment_6_overlap_dir,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter],
+            meme_motif_enrichment_dir,
+            dataset_name,
+            fasta_suffix_list[list_counter]))
+
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
+            meme_motif_enrichment_6_overlap_script.write('\nwait\n\n')
+
+if analysis_mode == 'single_cell':
+    meme_motif_enrichment_6_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_6_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_6_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_6_overlap_script.write(" | parallel -j{} \"mkdir -p {}/{{}}_6_overlap\"\n\n".format(cpu_count, meme_motif_enrichment_dir))
+
+    meme_motif_enrichment_6_overlap_script.write("find {} -name '*all_peaks_clustered*' -type f -exec basename {{}} \\;".format(peaks_processing_dir))
+    meme_motif_enrichment_6_overlap_script.write(" | sed 's/_all_peaks_clustered\.tsv//'")
+    meme_motif_enrichment_6_overlap_script.write(" | sed 's/{}_//'".format(dataset_name))
+    meme_motif_enrichment_6_overlap_script.write(" | parallel -j{} \"cat {}/{}_{{}}_all_peaks_clustered.tsv".format(cpu_count, peaks_processing_dir, dataset_name))
+    meme_motif_enrichment_6_overlap_script.write(r""" | awk '\$7 >= 6'""")
+    meme_motif_enrichment_6_overlap_script.write(" > {}/{{}}_6_overlap/6_overlap_peaks.tsv\"\n\n".format(meme_motif_enrichment_dir))
+                                                  
+    meme_motif_enrichment_6_overlap_script.write("find {} -name '6_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"caras_meme_sequence_extractor.py --input {}/{{}}/6_overlap_peaks.tsv --fastadir {}/bwa --chrsizedir {}/chrom.sizes --outputdir {}/{{}} --ref {}{}\"\n\n".format(
+        meme_motif_enrichment_dir,
+        meme_motif_enrichment_dir,
+        genome_dir,
+        genome_dir,
+        meme_motif_enrichment_dir,
+        genome_ref,
+        meme_sequence_extractor_background_arg))
+
+    meme_motif_enrichment_6_overlap_script.write("find {} -name '6_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j{} \"meme-chip -oc {}/{{}}{}{} {}/{{}}/target.fa 1> {}/logs/{}_{{}}_6_overlap.MEMEmotifenrichment.out 2> {}/logs/{}_{{}}_6_overlap.MEMEmotifenrichment.err\"\n".format(
+        meme_motif_enrichment_dir,
+        cpu_count,
+        meme_motif_enrichment_dir,
         meme_chip_background_arg,
         meme_chip_arg,
-        meme_motif_enrichment_6_overlap_dir,
-        fasta_suffix_list[list_counter],
+        meme_motif_enrichment_dir,
         meme_motif_enrichment_dir,
         dataset_name,
-        fasta_suffix_list[list_counter],
         meme_motif_enrichment_dir,
-        dataset_name,
-        fasta_suffix_list[list_counter]))
-
-    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(fasta_suffix_list) - 1):
-        meme_motif_enrichment_6_overlap_script.write('\nwait\n\n')
-        
+        dataset_name))
+    
 meme_motif_enrichment_6_overlap_script.close() # Closing the script 'meme_motif_enrichment_6_overlap_script.sh'. Flushing the write buffer
 
 
@@ -5633,17 +5614,14 @@ master_script.write('{}\n\n'.format(raw_data_script_name))
 master_script.write('echo Running quality check on the raw sequencing reads\n')
 master_script.write('{}\n\n'.format(raw_reads_quality_control_script_name))
 
-# master_script.write('echo Removing optical and tile-edge duplicates with bbmap clumpify\n')
-# master_script.write('{}\n\n'.format(deduplicating_script_name))
+master_script.write('echo Removing optical and tile-edge duplicates with bbmap clumpify\n')
+master_script.write('{}\n\n'.format(deduplicating_script_name))
 
 master_script.write('echo Trimming the left sequencing adapter from each read with bbmap bbduk\n')
 master_script.write('{}\n\n'.format(adapter_trimming_script_name))
 
 master_script.write('echo Trimming low quality bases and drop low quality reads using trimmomatic\n')
 master_script.write('{}\n\n'.format(quality_trimming_script_name))
-
-# master_script.write('echo Trimming short adapter sequences using kseq\n')
-# master_script.write('{}\n\n'.format(kseq_trimming_script_name))
 
 master_script.write('echo Running quality check on the preprocessed sequencing reads.\n')
 master_script.write('{}\n\n'.format(preprocessed_reads_quality_control_script_name))
@@ -5686,7 +5664,7 @@ master_script.write('{}\n\n'.format(peaks_processing_script_name))
 
 
 
-if analysis_mode == 'bulk':
+if analysis_mode == 'bulk' and genome_ref in complete_genome:
     
     if args.goann and not args.pathann:
         master_script.write('echo Annotating every individual peak with all relevant GO terms from HOMER annotatePeaks -go feature\n')
@@ -5705,60 +5683,60 @@ if analysis_mode == 'bulk':
         master_script.write('{}\n\n'.format(go_pathway_annotation_script_name))
 
 
-    if args.homer_motif: # Motif enrichment analyses are only performed on datasets with narrow peaks
+if args.homer_motif: # Motif enrichment analyses are only performed on datasets with narrow peaks
+    
+    if 'union' in homer_motif_peakset or '1' in homer_motif_peakset: # If user wants analysis on the 1_overlap peak set (everything)
+        master_script.write('echo Performing motif enrichment analysis on the 1_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_1_overlap_script_name))
+    
+    if '2' in homer_motif_peakset: # If user wants analysis on the 2_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 2_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_2_overlap_script_name))
         
-        if 'union' in homer_motif_peakset or '1' in homer_motif_peakset: # If user wants analysis on the 1_overlap peak set (everything)
-            master_script.write('echo Performing motif enrichment analysis on the 1_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_1_overlap_script_name))
+    if '3' in homer_motif_peakset: # If user wants analysis on the 3_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 3_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_3_overlap_script_name))
+
+    if '4' in homer_motif_peakset: # If user wants analysis on the 4_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 4_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_4_overlap_script_name))
+
+    if '5' in homer_motif_peakset: # If user wants analysis on the 5_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 5_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_5_overlap_script_name))
+
+    if 'consensus' in homer_motif_peakset or '6' in homer_motif_peakset: # If user wants analysis on the 6_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 6_overlap peak set with HOMER findMotifsGenome.pl\n')
+        master_script.write('{}\n\n'.format(homer_motif_enrichment_6_overlap_script_name))
+    
+
+if args.meme_motif: # Motif enrichment analyses are only performed on datasets with narrow peaks
+    
+    if 'union' in meme_motif_peakset or '1' in meme_motif_peakset: # If user wants analysis on the 1_overlap peak set (everything)
+        master_script.write('echo Performing motif enrichment analysis on the 1_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_1_overlap_script_name))
+    
+    if '2' in meme_motif_peakset: # If user wants analysis on the 2_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 2_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_2_overlap_script_name))
         
-        if '2' in homer_motif_peakset: # If user wants analysis on the 2_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 2_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_2_overlap_script_name))
-            
-        if '3' in homer_motif_peakset: # If user wants analysis on the 3_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 3_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_3_overlap_script_name))
+    if '3' in meme_motif_peakset: # If user wants analysis on the 3_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 3_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_3_overlap_script_name))
 
-        if '4' in homer_motif_peakset: # If user wants analysis on the 4_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 4_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_4_overlap_script_name))
+    if '4' in meme_motif_peakset: # If user wants analysis on the 4_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 4_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_4_overlap_script_name))
 
-        if '5' in homer_motif_peakset: # If user wants analysis on the 5_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 5_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_5_overlap_script_name))
+    if '5' in meme_motif_peakset: # If user wants analysis on the 5_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 5_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_5_overlap_script_name))
 
-        if 'consensus' in homer_motif_peakset or '6' in homer_motif_peakset: # If user wants analysis on the 6_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 6_overlap peak set with HOMER findMotifsGenome.pl\n')
-            master_script.write('{}\n\n'.format(homer_motif_enrichment_6_overlap_script_name))
-        
+    if 'consensus' in meme_motif_peakset or '6' in meme_motif_peakset: # If user wants analysis on the 6_overlap peak set
+        master_script.write('echo Performing motif enrichment analysis on the 6_overlap peak set with MEME meme-chip &\n')
+        master_script.write('{} &\n\n'.format(meme_motif_enrichment_6_overlap_script_name))
 
-    if args.meme_motif: # Motif enrichment analyses are only performed on datasets with narrow peaks
-        
-        if 'union' in meme_motif_peakset or '1' in meme_motif_peakset: # If user wants analysis on the 1_overlap peak set (everything)
-            master_script.write('echo Performing motif enrichment analysis on the 1_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_1_overlap_script_name))
-        
-        if '2' in meme_motif_peakset: # If user wants analysis on the 2_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 2_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_2_overlap_script_name))
-            
-        if '3' in meme_motif_peakset: # If user wants analysis on the 3_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 3_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_3_overlap_script_name))
-
-        if '4' in meme_motif_peakset: # If user wants analysis on the 4_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 4_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_4_overlap_script_name))
-
-        if '5' in meme_motif_peakset: # If user wants analysis on the 5_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 5_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_5_overlap_script_name))
-
-        if 'consensus' in meme_motif_peakset or '6' in meme_motif_peakset: # If user wants analysis on the 6_overlap peak set
-            master_script.write('echo Performing motif enrichment analysis on the 6_overlap peak set with MEME meme-chip &\n')
-            master_script.write('{} &\n\n'.format(meme_motif_enrichment_6_overlap_script_name))
-
-        master_script.write('wait\n\n')
+    master_script.write('wait\n\n')
 
 master_script.close() # Closing the script 'MASTER_script.sh'. Flushing the write buffer
 
@@ -5772,10 +5750,9 @@ print('Marking all generated bash scripts as executable')
 # Bash commands to mark all the suite-generated bash scripts above as executable
 subprocess.run('chmod +x ' + raw_data_script_name, shell = True)
 subprocess.run('chmod +x ' + raw_reads_quality_control_script_name, shell = True)
-# subprocess.run('chmod +x ' + deduplicating_script_name, shell = True)
+subprocess.run('chmod +x ' + deduplicating_script_name, shell = True)
 subprocess.run('chmod +x ' + adapter_trimming_script_name, shell = True)
 subprocess.run('chmod +x ' + quality_trimming_script_name, shell = True)
-# subprocess.run('chmod +x ' + kseq_trimming_script_name, shell = True)
 subprocess.run('chmod +x ' + preprocessed_reads_quality_control_script_name, shell = True)
 subprocess.run('chmod +x ' + bwa_mem_aligning_script_name, shell = True)
 subprocess.run('chmod +x ' + mapq_filtering_script_name, shell = True)

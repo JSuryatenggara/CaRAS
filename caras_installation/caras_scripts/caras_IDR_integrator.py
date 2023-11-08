@@ -194,13 +194,12 @@ output_peak_header = input_peak_header
 # Insert summed_idr_value and converted_idr_value behind the column "Number of Motifs" in the input fold change calculated peak list file header
 output_peak_header[(motif_count_column_number + 1):(motif_count_column_number + 1)] = ['negLog10_IDR', 'IDR']
 
-# Column header names when dealing with narrow peak datasets (SICER2 instead of GEM)
-if 'SICER2' in idr_tsv_full_path_list[1]:
-    output_peak_header = output_peak_header + ['negLog10_IDR_MACS2_vs_union', 'negLog10_IDR_SICER2_vs_union', 'negLog10_IDR_HOMER_vs_union', 'negLog10_IDR_Genrich_vs_union']
-
-# Column header names when dealing with broad peak datasets (GEM instead of SICER2)
-elif 'GEM' in idr_tsv_full_path_list[1]:
-    output_peak_header = output_peak_header + ['negLog10_IDR_MACS2_vs_union', 'negLog10_IDR_GEM_vs_union', 'negLog10_IDR_HOMER_vs_union', 'negLog10_IDR_Genrich_vs_union']
+output_peak_header = output_peak_header + ['negLog10_IDR_MACS2_vs_union', 
+                                            'negLog10_IDR_GEM_vs_union', 
+                                            'negLog10_IDR_HOMER_vs_union', 
+                                            'negLog10_IDR_Genrich_vs_union', 
+                                            'negLog10_IDR_SEACR_vs_union',
+                                            'negLog10_IDR_SICER2_vs_union']
 
 
 # Writing the output file (which is a modified version of the input file)

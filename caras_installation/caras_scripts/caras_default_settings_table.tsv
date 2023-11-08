@@ -10,7 +10,7 @@ plotfingerprint
 reads_normalizer	--norm properly_paired
 fastqc3	-q
 macs2_callpeak	
-gem	-Xmx10G --k_min 8 --k_max 12
+gem	-Xmx100G --k_min 8 --k_max 12
 sicer2	-w 50 -g 100
 homer_findPeaks	-region
 genrich	-v
@@ -18,5 +18,6 @@ seacr
 homer_mergePeaks	
 homer_annotatePeaks	
 fold_change_calculator	--normfactor user_value --chip_norm 1 --ctrl_norm 1
+peak_feature_extractor	--filter 4 --top_rank 50 --database kegg
 homer_findMotifsGenome	-size given -mask
 meme_chip	-meme-nmotifs 25
