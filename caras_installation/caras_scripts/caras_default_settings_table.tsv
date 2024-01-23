@@ -18,6 +18,6 @@ seacr
 homer_mergePeaks	
 homer_annotatePeaks	
 fold_change_calculator	--normfactor user_value --chip_norm 1 --ctrl_norm 1
-peak_feature_extractor	--filter 4 --top_rank 50 --database kegg
+peak_feature_extractor	--filter 4 --top_rank 50 --database biological_process
 homer_findMotifsGenome	-size given -mask
 meme_chip	-meme-nmotifs 25

@@ -133,11 +133,11 @@ for idr_full_path in idr_full_path_list: # For every instance of idr.py script f
 
 genome_folder_full_path = "genome_folder_full_path = '{}/genomes'".format(sys.path[0]) # Define the new path to genome folder based on installation directory
 
-dashboard_full_path = '{}/caras_scripts/caras_dashboard.py'.format(sys.path[0]) # Define the script file in which the old path to the genome folder is to be replaced
-wizard_full_path = '{}/caras_scripts/caras_wizard.py'.format(sys.path[0]) # Define the script file in which the old path to the genome folder is to be replaced
+# dashboard_full_path = '{}/caras_scripts/caras_dashboard.py'.format(sys.path[0]) # Define the script file in which the old path to the genome folder is to be replaced
+# wizard_full_path = '{}/caras_scripts/caras_wizard.py'.format(sys.path[0]) # Define the script file in which the old path to the genome folder is to be replaced
 
-replace_path(dashboard_full_path, 'genome_folder_full_path =', genome_folder_full_path) # Replace the old path to the genome folder with the new one
-replace_path(wizard_full_path, 'genome_folder_full_path =', genome_folder_full_path) # Replace the old path to the genome folder with the new one
+# replace_path(dashboard_full_path, 'genome_folder_full_path =', genome_folder_full_path) # Replace the old path to the genome folder with the new one
+# replace_path(wizard_full_path, 'genome_folder_full_path =', genome_folder_full_path) # Replace the old path to the genome folder with the new one
 
 
 homer_genome_update_script_full_path = '{}/homer_genome_update.sh'.format(sys.path[0]) # Define the script file in which the old path to the genome folder is to be replaced

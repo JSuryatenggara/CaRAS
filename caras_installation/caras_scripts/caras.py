@@ -356,8 +356,8 @@ caras_installation_dir = '/'.join((caras_scripts_dir.split('/'))[:-1])
 local_directory = caras_installation_dir
 
 program_update_check_list = ['caras_scripts/caras.py',
-                            'caras_scripts/caras_dashboard.py',
-                            'caras_scripts/caras_wizard.py',
+                            # 'caras_scripts/caras_dashboard.py',
+                            # 'caras_scripts/caras_wizard.py',
                             'caras_scripts/caras_reads_normalizer.py',
                             'caras_scripts/caras_Genrich.py',
                             'caras_scripts/caras_upset_plotter.py',
@@ -372,7 +372,7 @@ program_update_check_list = ['caras_scripts/caras.py',
                             'caras_scripts/SEACR_1.3.sh',
                             'caras_scripts/SEACR_1.3.R',
                             'caras_env_linux.yml',
-                            'caras_env_macos.yml',
+                            # 'caras_env_macos.yml',
                             'caras_installer.py',
                             'homer_genome_update.sh',
                             'idr.py',
@@ -2609,6 +2609,13 @@ if start_from_bam == False:
                 if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
                     mapq_filtering_script.write('\nwait\n\n')
 
+            for list_counter in range(len(ctrl_name)):
+                mapq_filtering_script.write('rm -r -f {}/{}.mapped.bam.bai &\n'.format(
+                    bwa_mem_aligning_dir, 
+                    ctrl_name[list_counter]))
+
+            mapq_filtering_script.write('\nwait\n\n')
+            
 mapq_filtering_script.close() # Closing the script '07_MAPQ_filtering_script.sh'. Flushing the write buffer
 
 

@@ -100,6 +100,7 @@ def combi_stats(input_tsv, output_tsv):
 
         # Prepare all the stats counters for all possible peak caller combinations
         for peak_caller_dict_key, peak_caller_dict_value in peak_caller_dict.items():
+            peak_caller_overlaps        = len(peak_caller_dict_key.split('|'))
             motif_count_exclusive       = 0
             chip_read_sum_exclusive     = 0
             fold_change_sum_exclusive   = 0
@@ -189,7 +190,8 @@ def combi_stats(input_tsv, output_tsv):
 
                 # Update the original values (zeroes) of the keys in the dictionary with 
                 #   the statistical counters obtained from the iterations above
-                peak_caller_dict.update({peak_caller_dict_key:[peak_count_exclusive, 
+                peak_caller_dict.update({peak_caller_dict_key:[peak_caller_overlaps,
+                                                            peak_count_exclusive, 
                                                             pos_peak_count_exclusive, 
                                                             motif_count_exclusive, 
                                                             pos_peak_hit_rate_exclusive, 
@@ -211,7 +213,8 @@ def combi_stats(input_tsv, output_tsv):
     	# Writing the output: Summary table containing peak caller performance-related of the called peaks, 
         #   grouped by the combinations of peak callers that called each of them.
         w = csv.writer(output_tsv, delimiter='\t')
-        w.writerow(['peak_callers', 
+        w.writerow(['peak_caller_combination',
+                    'peak_caller_overlaps', 
                     'peak_count_exclusive', 
                     'pos_peak_count_exclusive', 
                     'motif_count_exclusive', 
