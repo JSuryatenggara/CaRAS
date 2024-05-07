@@ -563,6 +563,7 @@ There are a couple of things to look for to answer this question. 1, the fingerp
 
 
 6. <b>What about the single-cell analysis results? What’s the difference?</b>
+
     As mentioned before (see section peak feature extraction above), in single-cell analysis, the differences (distance values) between all sample’s extracted features profile are to be projected into a 2D plane and clustered based on the projected their 2D positions to one another. After clustering, the peak lists of all samples which are clustered into a same group will be concatenated into one, namely [setname]_[peakset]_[GO/pathway database]_[group#]_ all_peaks _clustered.tsv. To ascertain that the samples are satisfactorily segregated as expected, user can view the MDS-projected 2D scatter plot, namely [setname]_[peakset]_[GO/pathway database]_Term_Ranking _RBO_Distance_MDS_Spectral_Clustering.png.
 
     <img src="https://raw.githubusercontent.com/JSuryatenggara/CaRAS/storage/images/spectral_clustering_guide.png" width="500">
