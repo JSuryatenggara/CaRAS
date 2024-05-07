@@ -569,32 +569,4 @@ There are a couple of things to look for to answer this question. 1, the fingerp
 
     Above is an example of MDS-projected 2D plot, showing a good segregation by spectral clustering of 2 different populations with 20 samples each. Besides the fact that spectral clustering works nicely on these samples 2D distribution, this also means that the algorithm of determining the optimal number by maximum eigengap value is accurate (because in this example, the optimal number of clusters was automatically estimated by CaRAS). In cases where the estimation is off (e.g., 3 clusters), users can explicitly state the optimal number of clusters, which is 2 in this case, via --clustnum flag in peak_feature_extractor.py and rerun the script. Beforehand, if the user already knows how many clusters to expect even without looking at the plot above first, users can explicitly state the expected number of clusters via --clustnum in the CaRAS command line.
 
-    Upon agreeable clustering results, a group-based gene ontology enrichment analysis is performed which results are stored in folder 22_peaks_processing, reflecting the collective cellular roles of the DNA-binding protein in each distinct population. Later down the workflow, motif enrichment analyses by HOMER and MEME are also performed in a group-based manner, resulting in the enrichment of DNA-binding motifs of the target protein in each distinct population. 
-
-<br>
-
-## Manuals and Citations
-If you use CaRAS in your analysis, please cite us and all the following programs.
-
-| Program | Reference |
-|-|-|
-| CaRAS<br>v1.0 | Guide: https://github.com/JSuryatenggara/CaRAS/wiki/CaRAS-Guide<br>Github: https://github.com/JSuryatenggara/CaRAS |
-| Python3<br>3.7.x / 3.8.x | We have noted in our testing that there is a change in python 3.8 on macOS in how multi-threading is handled which breaks CaRAS.  As such, for macOS installs you must ensure that ptyhon3.7.x is installed.  If using our installation guides, the provided yml files will ensure all the correct dependencies and requirements are met automatically. |
-| FastQC<br>v0.12.1 | Guide: https://www.bioinformatics.babraham.ac.uk/projects/fastqc/<br>GitHub: https://github.com/s-andrews/FastQC |
-| Clumpify<br>v38.18 (BBmap) | Introduction: https://www.biostars.org/p/225338/<br>Guide: https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/clumpify-guide/<br>GitHub: https://github.com/BioInfoTools/BBMap/blob/master/sh/clumpify.sh<br>Citation: https://www.osti.gov/biblio/1241166-bbmap-fast-accurate-splice-aware-aligner
-| BBDuk<br>v38.18 (BBmap) | Introduction: http://seqanswers.com/forums/showthread.php?t=42776<br>Guide: https://jgi.doe.gov/data-and-tools/bbtools/bb-tools-user-guide/bbduk-guide/<br>GitHub: https://github.com/BioInfoTools/BBMap/blob/master/sh/bbduk.sh<br>Citation: https://www.osti.gov/biblio/1241166-bbmap-fast-accurate-splice-aware-aligner
-| Trimmomatic<br>v0.39 | Guide: http://www.usadellab.org/cms/?page=trimmomatic<br>Downloadable manual page: http://www.usadellab.org/cms/uploads/supplementary/Trimmomatic/TrimmomaticManual_V0.32.pdf<br>GitHub: https://github.com/timflutre/trimmomatic<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4103590/ |
-| bwa<br>v0.7.17 | Guide: http://bio-bwa.sourceforge.net/bwa.shtml<br>GitHub: https://github.com/lh3/bwa<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2705234/ | 
-| samtools view<br>v1.9 (samtools) | Guide: http://www.htslib.org/doc/samtools-view.html<br>GitHub: https://github.com/samtools/samtools<br>Citation: https://pubmed.ncbi.nlm.nih.gov/19505943/<br> | 
-| deeptools<br>plotFingerprint<br>v3.5.2 (deepTools) | Guide: https://deeptools.readthedocs.io/en/develop/content/tools/plotFingerprint.html<br>Citation: https://academic.oup.com/nar/article/44/W1/W160/2499308?login=true |
-| MACS2<br>v2.2.7.1 | Guide: https://hbctraining.github.io/Intro-to-ChIPseq/lessons/05_peak_calling_macs.html<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2732366/<br>GitHub: https://github.com/macs3-project/MACS/wiki |
-| GEM<br>v2.7 | Guide: https://groups.csail.mit.edu/cgs/gem/<br>GitHub: https://github.com/gifford-lab/GEM<br>Citation: https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1002638 |
-| SICER2<br>v1.0.2 | Guide: https://zanglab.github.io/SICER2/<br>GitHub: https://github.com/bioinf/SICER2<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2732366/ |
-| SEACR<br>v1.3 | GitHub: https://github.com/FredHutch/SEACR<br>Citation: https://epigeneticsandchromatin.biomedcentral.com/articles/10.1186/s13072-019-0287-4 |
-| HOMER<br>findPeaks<br>v4.11 (HOMER) | Guide: http://homer.ucsd.edu/homer/ngs/peaks.html<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2898526/ |
-| Genrich<br>v0.6.1 | Guide: https://informatics.fas.harvard.edu/atac-seq-guidelines.html<br>GitHub: https://github.com/jsh58/Genrich |
-| HOMER<br>mergePeaks<br>v4.11 (HOMER) | Guide: http://homer.ucsd.edu/homer/ngs/mergePeaks.html<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2898526/ |
-| HOMER<br>annotatePeaks<br>v4.11 (HOMER) | Guide: http://homer.ucsd.edu/homer/ngs/annotation.html<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2898526/ |
-| IDR<br>v2.0.4.2 | GitHub: https://github.com/nboley/idr<br>Citation: https://projecteuclid.org/journals/annals-of-applied-statistics/volume-5/issue-3/Measuring-reproducibility-of-high-throughput-experiments/10.1214/11-AOAS466.full |
-| HOMER<br>findMotifsGenome<br>v4.11 (HOMER) | Guide: http://homer.ucsd.edu/homer/ngs/peakMotifs.html<br>Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2898526/
-| MEME<br>meme-chip<br>V5.0.5 (MEME) | Guide: https://meme-suite.org/meme/doc/meme-chip.html<br> Citation: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2703892/ | 
+    Upon agreeable clustering results, a group-based gene ontology enrichment analysis is performed which results are stored in folder 22_peaks_processing, reflecting the collective cellular roles of the DNA-binding protein in each distinct population. Later down the workflow, motif enrichment analyses by HOMER and MEME are also performed in a group-based manner, resulting in the enrichment of DNA-binding motifs of the target protein in each distinct population.
