@@ -1,6 +1,15 @@
+<p align="center">
 <img src="https://raw.githubusercontent.com/JSuryatenggara/CaRAS/storage/images/CaRAS_logo.png" width="1000">
-
-This documentation is available as a pdf (https://github.com/JSuryatenggara/CaRAS/blob/main/Guides/CaRAS%20Documentation.pdf).
+</p>
+<p align="center">
+	<b>C</b>UT-<b>a</b>nd-<b>R</b>UN <b>A</b>nalysis <b>S</b>uite
+</p>
+<p align="center">
+	<b>Inherently Simple CUT&RUN Analysis</b>
+</p>
+<p align="center">
+	Developed by Jeremiah Suryatenggara and Mahmoud A. Bassal
+</p>
 
 ## Introduction
 CaRAS (CUT-and-RUN Analysis Suite) (https://github.com/JSuryatenggara/CaRAS) was conceived as an all-in-one analysis pipeline specifically tailored and optimized for CUT&RUN/Tag. CaRAS is a unified interface and wrapper tailored for the new generation of ChIP-Seq: CUT&RUN and CUT&Tag analysis (for the sake of conciseness, both techniques will be referred to as simply CnR). CaRAS builds on the same programming framework as ChIP-AP (https://github.com/JSuryatenggara/ChIP-AP), sharing a number of similar methodologies and working characteristics but diverges in that it tailors specific analysis steps specifically for CnR analyses that are yet unpublished for CnR aimed workflows.
