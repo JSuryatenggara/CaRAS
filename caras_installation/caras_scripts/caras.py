@@ -58,12 +58,14 @@ print('Importing required modules')
 from os.path import dirname as up
 import argparse
 import os
+import shutil
+import sys
 import errno
 import math
 import multiprocessing
 import subprocess
 import numpy as np
-from shutil import which
+import shutil
 import pandas as pd
 import requests
 import pathlib
@@ -226,12 +228,11 @@ parser.add_argument('--motif',
 
 parser.add_argument('--ref', 
                     help = '<Optional> Your sample organism genome reference build. Default is hg38 (human).', 
-                    choices = ['hg19', 'hg38', 'mm9', 'mm10', 'mm39', 'dm6', 'sacCer3'], 
                     default = 'hg38')
 
 parser.add_argument('--norm_ref', 
                     help = '<Optional> The spiked-in or carry-over DNA genome used in the Cut and Run protocol. For peak calling signal normalization. Default is no normalization (none).', 
-                    choices = ['none', 'sacCer3', 'eColiK12'])
+                    choices = ['none', 'sacCer3', 'eColiK12', 'greenlist'])
 
 parser.add_argument('--goann', 
                     help = '<Optional> Use to annotate peaks with all relevant GO terms.', 
@@ -293,29 +294,21 @@ if args.motif:
 if not args.motif:
     motif_file_full_path = None
 
-complete_genome = ['hg19', 'hg38', 'mm9', 'mm10', 'dm6', 'sacCer3']
+# List of genome reference readily supported by ChIP-AP
+supported_genome = ['hg19', 'hg38', 'mm9', 'mm10', 'dm6', 'sacCer3']
 
 # Reference genome to be used depending on sample organism. For now, the suite can take in human and mouse samples
-if args.ref == 'hg19':
-    genome_ref = 'hg19' # For human samples
-if args.ref == 'hg38':
-    genome_ref = 'hg38' # For human samples
-if args.ref == 'mm9':
-    genome_ref = 'mm9' # For mice samples
-if args.ref == 'mm10':
-    genome_ref = 'mm10' # For mice samples
-if args.ref == 'mm39':
-    genome_ref = 'mm39' # For mice samples
-if args.ref == 'dm6':
-    genome_ref = 'dm6' # For fruitfly samples
-if args.ref == 'sacCer3':
-    genome_ref = 'sacCer3' # For yeast samples
+genome_ref = args.ref
 
 # Reference genome to be used depending on the spiked-in or carry-over DNA genome used in the Cut and Run protocol.
 if args.norm_ref:
     norm_ref = args.norm_ref
 else:
     norm_ref = 'none'
+
+if norm_ref == 'greenlist' and genome_ref not in ['hg38']:
+    print('Currently "greenlist" reads normalization only works for hg38 genome reference. Exiting program.')
+    exit()
 
 force_merge = 1 if args.fcmerge else 0
 
@@ -372,7 +365,7 @@ program_update_check_list = ['caras_scripts/caras.py',
                             'caras_scripts/SEACR_1.3.sh',
                             'caras_scripts/SEACR_1.3.R',
                             'caras_env_linux.yml',
-                            # 'caras_env_macos.yml',
+                            'caras_env_macos.yml',
                             'caras_installer.py',
                             'homer_genome_update.sh',
                             'idr.py',
@@ -427,7 +420,6 @@ hg19_effective_genome_size      = '2861327131'
 hg38_effective_genome_size      = '2937639113'
 mm9_effective_genome_size       = '2558509480'
 mm10_effective_genome_size      = '2647521431'
-mm39_effective_genome_size      = '2649921816'
 dm6_effective_genome_size       = '137057575'
 sacCer3_effective_genome_size   = '12071326'
 
@@ -439,8 +431,6 @@ if genome_ref == 'mm9':
     effective_genome_size = mm9_effective_genome_size
 if genome_ref == 'mm10':
     effective_genome_size = mm10_effective_genome_size
-if genome_ref == 'mm39':
-    effective_genome_size = mm39_effective_genome_size
 if genome_ref == 'dm6':
     effective_genome_size = dm6_effective_genome_size
 if genome_ref == 'sacCer3':
@@ -662,21 +652,25 @@ if args.custom_setting_table:
     custom_settings_table_full_path = os.path.abspath(args.custom_setting_table)
 
 if not args.custom_setting_table:
-    # If not provided, suite will read the default custom settings table, currently provided in the genome folder
-    if os.path.isfile('{}/caras_default_settings_table.tsv'.format(args.genome)):
-        custom_settings_table_full_path = os.path.abspath('{}/caras_default_settings_table.tsv'.format(args.genome))
+    # If not provided, suite will parse the path to caras installation directory
+    caras_path_check = subprocess.Popen('which caras.py', shell = True, stdout = subprocess.PIPE) # Get the full path to caras.py
+    caras_path = caras_path_check.communicate()[0].decode('utf-8')
+    caras_dir = '/'.join(caras_path.split('/')[:-1])
+
+    # Then if the default custom settings table file is found in caras installation directory, use it for the run
+    if os.path.isfile('{}/caras_default_settings_table.tsv'.format(caras_dir)):
+        print('Custom settings table not assigned. Using default settings as described in: {}/caras_default_settings_table.tsv\n'.format(caras_dir))
+        custom_settings_table_full_path = '{}/caras_default_settings_table.tsv'.format(caras_dir)
 
     else:
-        caras_path_check = subprocess.Popen('which caras.py', shell = True, stdout = subprocess.PIPE) # Get the full path to caras.py
-        caras_path = caras_path_check.communicate()[0].decode('utf-8')
-        caras_dir = '/'.join(caras_path.split('/')[:-1])
-        print('{}/caras_default_settings_table.tsv'.format(caras_dir))
-        
-        if os.path.isfile('{}/caras_default_settings_table.tsv'.format(caras_dir)):
-            custom_settings_table_full_path = '{}/caras_default_settings_table.tsv'.format(caras_dir)
+        if os.path.isfile('{}/caras_default_settings_table.tsv'.format(args.genome)):
+            # Otherwise, check if the default custom settings table file is found in the genome directory, and then use it for the run
+            print('Custom settings table not assigned. Using default settings as described in: {}/caras_default_settings_table.tsv\n'.format(args.genome))
+            custom_settings_table_full_path = os.path.abspath('{}/caras_default_settings_table.tsv'.format(args.genome))
 
         else:
-            print('Could not find default_settings_table.tsv in default paths. Please provide the path manually using --custom_setting_table flag')
+            # If not found in both directories above, send error message
+            print('Could not find caras_default_settings_table.tsv in default paths. Please provide the path manually using --custom_setting_table flag')
             exit()
 
 custom_settings_table_df        = pd.read_csv(custom_settings_table_full_path, delimiter='\t')
@@ -957,6 +951,23 @@ print(command_line_string + '\n')
 ### SUITE REQUIREMENTS CHECKPOINT
 ########################################################################################################################
 
+distribution_name_list = ['Anaconda', 'Anaconda2', 'Anaconda3', 'Miniconda', 'Miniconda2', 'Miniconda3', 'Miniforge', 'Miniforge2', 'Miniforge3']
+
+conda_file = shutil.which('conda') # Get the full path to conda executable
+
+if any(distribution_name in conda_file.split('/') for distribution_name in distribution_name_list):
+    for distribution_name in distribution_name_list:
+        if distribution_name in conda_file.split('/'):
+            conda_dir = '{}{}'.format(conda_file.split(distribution_name)[0], distribution_name) # Get the parent directory of the conda distribution
+            break
+
+elif any(distribution_name.lower() in conda_file.split('/') for distribution_name in distribution_name_list):
+    for distribution_name in distribution_name_list:
+        if distribution_name.lower() in conda_file.split('/'):
+            conda_dir = '{}{}'.format(conda_file.split(distribution_name.lower())[0], distribution_name.lower()) # Get the parent directory of the conda distribution
+            break
+
+
 print('Checking for suite requirements')
 # 0 for error_status means the suite is not lacking anything necessary and is good to go
 error_status = 0
@@ -970,7 +981,7 @@ error_status = 0
 # If any of the suite requirements is not met, it will set the error_status to 1 and 
 #   the script will print some troubleshooting instructions for the user
 
-if which('fastqc') is None:
+if shutil.which('fastqc') is None:
     print('Please make sure fastqc is installed, in PATH, and marked as executable')
     error_status = 1
 
@@ -978,7 +989,7 @@ if check_program('fastqc --help') is False:
     print('Pre-run test of fastqc failed. Please try running fastqc individually to check for the problem')
     error_status = 1
 
-if which('clumpify.sh') is None:
+if shutil.which('clumpify.sh') is None:
     print('Please make sure clumpify.sh is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -986,7 +997,7 @@ if check_program('clumpify.sh') is False:
     print('Pre-run test of clumpify.sh failed. Please try running clumpify.sh individually to check for the problem')
     error_status = 1
 
-if which('bbduk.sh') is None:
+if shutil.which('bbduk.sh') is None:
     print('Please make sure bbduk.sh is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -994,20 +1005,23 @@ if check_program('bbduk.sh') is False:
     print('Pre-run test of bbduk.sh failed. Please try running bbduk.sh individually to check for the problem')
     error_status = 1
 
-# Try to look for trimmomatic in the home directory first
-trimmomatic_exist, trimmomatic_full_path = find_program('trimmomatic.jar', home_dir)
+# Try to look for trimmomatic in the conda directory first
+trimmomatic_exist, trimmomatic_full_path = find_program('trimmomatic.jar', conda_dir)
 if not trimmomatic_exist:
-    # If trimmomatic does not exist in the home directory, try looking in the root directory
-    trimmomatic_exist, trimmomatic_full_path = find_program('trimmomatic.jar', root_dir)
-if not trimmomatic_exist:
-    print('Please make sure trimmomatic is installed in your computer')
-    error_status = 1
+    # If trimmomatic does not exist in the conda directory, try looking in the home directory
+    trimmomatic_exist, trimmomatic_full_path = find_program('trimmomatic.jar', home_dir)
+    if not trimmomatic_exist:
+        # If trimmomatic does not exist in the home directory, try looking in the root directory
+        trimmomatic_exist, trimmomatic_full_path = find_program('trimmomatic.jar', root_dir)
+        if not trimmomatic_exist:
+            print('Please make sure trimmomatic is installed in your computer')
+            error_status = 1
 
 if check_program('java -jar {}'.format(trimmomatic_full_path)) is False:
     print('Pre-run test of trimmomatic failed. Please try running trimmomatic individually to check for the problem')
     error_status = 1
 
-if which('bwa') is None:
+if shutil.which('bwa') is None:
     print('Please make sure bwa is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1015,7 +1029,7 @@ if check_program('bwa') is False:
     print('Pre-run test of bwa failed. Please try running bwa individually to check for the problem')
     error_status = 1
 
-if which('samtools') is None:
+if shutil.which('samtools') is None:
     print('Please make sure samtools is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1023,7 +1037,31 @@ if check_program('samtools') is False:
     print('Pre-run test of samtools failed. Please try running samtools individually to check for the problem')
     error_status = 1
 
-if which('bamCoverage') is None:
+# Try to look for gem in the conda directory first
+get_sizeFactors_exist, get_sizeFactors_full_path = find_program('get_sizeFactors.R', conda_dir)
+if not get_sizeFactors_exist:
+    # If get_sizeFactors does not exist in the conda directory, try looking in the home directory
+    get_sizeFactors_exist, get_sizeFactors_full_path = find_program('get_sizeFactors.R', home_dir)
+    if not get_sizeFactors_exist:
+        # If get_sizeFactors does not exist in the home directory, try looking in the root directory
+        get_sizeFactors_exist, get_sizeFactors_full_path = find_program('get_sizeFactors.R', root_dir)
+        if not get_sizeFactors_exist:
+            print('Please make sure CUT-RUN_greenlist is installed in your computer')
+            error_status = 1
+
+if check_program('Rscript --vanilla {}'.format(get_sizeFactors_full_path)) is False:
+    print('Pre-run test of get_sizeFactors.R failed. Please try running get_sizeFactors.R individually to check for the problem')
+    error_status = 1
+
+if shutil.which('multiBamSummary') is None:
+    print('Please make sure deeptools is installed, in PATH, and marked as executable')
+    error_status = 1 
+
+if check_program('multiBamSummary') is False:
+    print('Pre-run test of multiBamSummary failed. Please try running multiBamSummary individually to check for the problem')
+    error_status = 1
+
+if shutil.which('bamCoverage') is None:
     print('Please make sure deeptools is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1031,7 +1069,7 @@ if check_program('bamCoverage') is False:
     print('Pre-run test of bamCoverage failed. Please try running bamCoverage individually to check for the problem')
     error_status = 1
 
-if which('macs2') is None:
+if shutil.which('macs2') is None:
     print('Please make sure MACS2 is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1039,20 +1077,23 @@ if check_program('macs2') is False:
     print('Pre-run test of macs2 failed. Please try running macs2 individually to check for the problem')
     error_status = 1
 
-# Try to look for gem in the home directory first
-gem_exist, gem_full_path = find_program('gem.jar', home_dir)
+# Try to look for gem in the conda directory first
+gem_exist, gem_full_path = find_program('gem.jar', conda_dir)
 if not gem_exist:
-    # If gem does not exist in the home directory, try looking in the root directory
-    gem_exist, gem_full_path = find_program('gem.jar', root_dir)
-if not gem_exist:
-    print('Please make sure gem is installed in your computer')
-    error_status = 1
+    # If gem does not exist in the conda directory, try looking in the home directory
+    gem_exist, gem_full_path = find_program('gem.jar', home_dir)
+    if not gem_exist:
+        # If gem does not exist in the home directory, try looking in the root directory
+        gem_exist, gem_full_path = find_program('gem.jar', root_dir)
+        if not gem_exist:
+            print('Please make sure gem is installed in your computer')
+            error_status = 1
 
 if check_program('java -jar {}'.format(gem_full_path)) is False:
     print('Pre-run test of gem failed. Please try running gem individually to check for the problem')
     error_status = 1
 
-if which('makeTagDirectory') is None:
+if shutil.which('makeTagDirectory') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1060,7 +1101,7 @@ if check_program('makeTagDirectory') is False:
     print('Pre-run test of makeTagDirectory failed. Please try running HOMER makeTagDirectory individually to check for the problem')
     error_status = 1
 
-if which('findPeaks') is None:
+if shutil.which('findPeaks') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1068,7 +1109,7 @@ if check_program('findPeaks') is False:
     print('Pre-run test of findPeaks failed. Please try running HOMER findPeaks individually to check for the problem')
     error_status = 1
 
-if which('Genrich') is None:
+if shutil.which('Genrich') is None:
     print('Please make sure Genrich is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1076,7 +1117,7 @@ if check_program('Genrich') is False:
     print('Pre-run test of Genrich failed. Please try running Genrich individually to check for the problem')
     error_status = 1
 
-if which('caras_Genrich.py') is None:
+if shutil.which('caras_Genrich.py') is None:
     print('Please make sure caras_Genrich.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1084,17 +1125,19 @@ if check_program('caras_Genrich.py') is False:
     print('Pre-run test of caras_Genrich.py failed. Please try running caras_Genrich.py individually to check for the problem')
     error_status = 1
 
-# Try to look for SEACR in the home directory first
-seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', home_dir)
-if not seacr_r_exist:
-    # If seacr does not exist in the home directory, try looking in the root directory
-    seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', root_dir)
+# Try to look for SEACR in the conda directory first
+seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', conda_dir)
+if not gem_exist:
+    # If seacr does not exist in the conda directory, try looking in the home directory
+    seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', home_dir)
+    if not seacr_r_exist:
+        # If seacr does not exist in the home directory, try looking in the root directory
+        seacr_r_exist, seacr_r_full_path = find_program('SEACR_1.3.R', root_dir)
+        if not seacr_r_exist:
+            print('Please make sure SEACR is installed in your computer')
+            error_status = 1
 
-if not seacr_r_exist:
-    print('Please make sure SEACR is installed in your computer')
-    error_status = 1
-
-if which('SEACR_1.3.sh') is None:
+if shutil.which('SEACR_1.3.sh') is None:
     print('Please make sure SEACR_1.3.sh is installed, in PATH, and marked as executable')
     error_status = 1 
     
@@ -1102,7 +1145,7 @@ if check_program('SEACR_1.3.sh') is False:
     print('Pre-run test of SEACR_1.3.sh failed. Please try running SEACR_1.3.sh individually to check for the problem')
     error_status = 1
     
-if which('mergePeaks') is None:
+if shutil.which('mergePeaks') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1110,34 +1153,7 @@ if check_program('mergePeaks') is False:
     print('Pre-run test of mergePeaks failed. Please try running HOMER mergePeaks individually to check for the problem')
     error_status = 1
 
-# # Try to look for upSet plot in the home directory first
-# upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet.R', home_dir)
-# if not upset_plot_exist:
-#     # If upSet plot does not exist in the home directory, try looking in the root directory
-#     upset_plot_exist, upset_plot_full_path = find_program('multi_peaks_UpSet.R', root_dir)
-# if not upset_plot_exist:
-#     print('Please make sure multi_peaks_UpSet.R script exists in your computer')
-#     error_status = 1
-
-# if check_program(upset_plot_full_path) is False:
-#     print('Pre-run test of UpSet plot failed. Please try running multi_peaks_UpSet.R individually to check for the problem')
-#     error_status = 1
-
-### MULTIVENN SKIPPED FOR CARAS (CANNOT TAKE MORE THAN 5 SETS WHILE CARAS HAS 6) ###
-# # Try to look for multi Venn in the home directory first
-# multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', home_dir)
-# if not multi_venn_exist:
-#     # If multi Venn does not exist in the home directory, try looking in the root directory
-#     multi_venn_exist, multi_venn_full_path = find_program('multi_peaks_Venn.R', root_dir)
-# if not multi_venn_exist:
-#     print('Please make sure multi Venn is installed in your computer')
-#     error_status = 1
-
-# if check_program(multi_venn_full_path) is False:
-#     print('Pre-run test of multi Venn failed. Please try running multi Venn individually to check for the problem')
-#     error_status = 1
-
-if which('annotatePeaks.pl') is None:
+if shutil.which('annotatePeaks.pl') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1145,7 +1161,7 @@ if check_program('annotatePeaks.pl') is False:
     print('Pre-run test of annotatePeaks.pl failed. Please try running HOMER annotatePeaks.pl individually to check for the problem')
     error_status = 1
 
-if which('caras_reads_normalizer.py') is None:
+if shutil.which('caras_reads_normalizer.py') is None:
     print('Please make sure caras_reads_normalizer.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1153,7 +1169,7 @@ if check_program('caras_reads_normalizer.py') is False:
     print('Pre-run test of caras_reads_normalizer.py failed. Please try running caras_reads_normalizer.py individually to check for the problem')
     error_status = 1
 
-if which('caras_upset_plotter.py') is None:
+if shutil.which('caras_upset_plotter.py') is None:
     print('Please make sure caras_upset_plotter.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1161,7 +1177,7 @@ if check_program('caras_upset_plotter.py') is False:
     print('Pre-run test of caras_upset_plotter.py failed. Please try running caras_upset_plotter.py individually to check for the problem')
     error_status = 1
 
-if which('caras_fold_change_calculator.py') is None:
+if shutil.which('caras_fold_change_calculator.py') is None:
     print('Please make sure caras_fold_change_calculator.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1169,7 +1185,7 @@ if check_program('caras_fold_change_calculator.py') is False:
     print('Pre-run test of caras_fold_change_calculator.py failed. Please try running caras_fold_change_calculator.py individually to check for the problem')
     error_status = 1
 
-if which('caras_peak_feature_extractor.py') is None:
+if shutil.which('caras_peak_feature_extractor.py') is None:
     print('Please make sure caras_peak_feature_extractor.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1177,7 +1193,7 @@ if check_program('caras_peak_feature_extractor.py') is False:
     print('Pre-run test of caras_peak_feature_extractor.py failed. Please try running caras_peak_feature_extractor.py individually to check for the problem')
     error_status = 1
 
-if which('caras_peak_caller_stats_calculator.py') is None:
+if shutil.which('caras_peak_caller_stats_calculator.py') is None:
     print('Please make sure caras_peak_caller_stats_calculator.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1185,7 +1201,7 @@ if check_program('caras_peak_caller_stats_calculator.py') is False:
     print('Pre-run test of caras_peak_caller_stats_calculator.py failed. Please try running caras_peak_caller_stats_calculator.py individually to check for the problem')
     error_status = 1
 
-if which('caras_GO_annotator.py') is None:
+if shutil.which('caras_GO_annotator.py') is None:
     print('Please make sure caras_GO_annotator.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1193,7 +1209,7 @@ if check_program('caras_GO_annotator.py') is False:
     print('Pre-run test of caras_GO_annotator.py failed. Please try running caras_GO_annotator.py individually to check for the problem')
     error_status = 1
 
-if which('caras_pathway_annotator.py') is None:
+if shutil.which('caras_pathway_annotator.py') is None:
     print('Please make sure caras_pathway_annotator.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1201,7 +1217,7 @@ if check_program('caras_pathway_annotator.py') is False:
     print('Pre-run test of caras_pathway_annotator.py failed. Please try running caras_pathway_annotator.py individually to check for the problem')
     error_status = 1
 
-if which('findMotifsGenome.pl') is None:
+if shutil.which('findMotifsGenome.pl') is None:
     print('Please make sure HOMER is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1209,7 +1225,7 @@ if check_program('findMotifsGenome.pl') is False:
     print('Pre-run test of findMotifsGenome.pl failed. Please try running HOMER findMotifsGenome.pl individually to check for the problem')
     error_status = 1
 
-if which('caras_meme_sequence_extractor.py') is None:
+if shutil.which('caras_meme_sequence_extractor.py') is None:
     print('Please make sure caras_meme_sequence_extractor.py is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -1217,7 +1233,7 @@ if check_program('caras_meme_sequence_extractor.py') is False:
     print('Pre-run test of caras_meme_sequence_extractor.py failed. Please try running caras_meme_sequence_extractor.py individually to check for the problem')
     error_status = 1
 
-if which('meme-chip') is None:
+if shutil.which('meme-chip') is None:
     print('Please make sure MEME is installed, in PATH, and marked as executable')
     error_status = 1 
 
@@ -2251,7 +2267,7 @@ if start_from_bam == False:
                 bwa_mem_aligning_dir, 
                 chip_name[list_counter]))
 
-        if norm_ref != 'none':
+        if norm_ref in ['sacCer3', 'eColiK12']:
             for list_counter in range(len(chip_name)):
                 bwa_mem_aligning_script.write('bwa mem {} -t {} {}/bwa/{}.fa {}/{}.qualitytrimmed.fq.gz 2> {}/logs/{}.normaligning.err | samtools sort -@ {} -o {}/{}.normaligned.bam 2> /dev/null\n\n'.format(
                     bwa_mem_arg, 
@@ -2291,7 +2307,7 @@ if start_from_bam == False:
                     bwa_mem_aligning_dir, 
                     ctrl_name[list_counter]))
 
-            if norm_ref != 'none':
+            if norm_ref in ['sacCer3', 'eColiK12']:
                 for list_counter in range(len(ctrl_name)):
                     bwa_mem_aligning_script.write('bwa mem {} -t {} {}/bwa/{}.fa {}/{}.qualitytrimmed.fq.gz 2> {}/logs/{}.normaligning.err | samtools sort -@ {} -o {}/{}.normaligned.bam 2> /dev/null\n\n'.format(
                         bwa_mem_arg, 
@@ -2334,7 +2350,7 @@ if start_from_bam == False:
                 bwa_mem_aligning_dir, 
                 chip_name[list_counter]))
 
-        if norm_ref != 'none':
+        if norm_ref in ['sacCer3', 'eColiK12']:
             for list_counter in range(len(chip_name)):
                 bwa_mem_aligning_script.write('bwa mem {} -t {} {}/bwa/{}.fa {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz 2> {}/logs/{}.normaligning.err | samtools sort -@ {} -o {}/{}.normaligned.bam 2> /dev/null\n\n'.format(
                     bwa_mem_arg, 
@@ -2383,7 +2399,7 @@ if start_from_bam == False:
                     bwa_mem_aligning_dir, 
                     ctrl_name[list_counter]))
 
-            if norm_ref != 'none':
+            if norm_ref in ['sacCer3', 'eColiK12']:
                 for list_counter in range(len(ctrl_name)):
                     bwa_mem_aligning_script.write('bwa mem {} -t {} {}/bwa/{}.fa {}/{}.qualitytrimmed.fq.gz {}/{}.qualitytrimmed.fq.gz 2> {}/logs/{}.normaligning.err | samtools sort -@ {} -o {}/{}.normaligned.bam 2> /dev/null\n\n'.format(
                         bwa_mem_arg, 
@@ -2439,27 +2455,28 @@ if start_from_bam == False:
             if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(ctrl_name) - 1):
                 bwa_mem_aligning_script.write('\nwait\n\n')
 
-    if norm_ref != 'none':
-        for list_counter in range(len(chip_name)):
-            bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.normaligned.bam -bS > {}/{}.normmapped.bam &\n'.format(
-                bwa_mem_aligning_dir, 
-                chip_name[list_counter],
-                bwa_mem_aligning_dir, 
-                chip_name[list_counter]))
-
-            if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(chip_name) - 1):
-                bwa_mem_aligning_script.write('\nwait\n\n')
-                
-        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-            for list_counter in range(len(ctrl_name)):
+    if start_from_bam == False:
+        if norm_ref in ['sacCer3', 'eColiK12']:
+            for list_counter in range(len(chip_name)):
                 bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.normaligned.bam -bS > {}/{}.normmapped.bam &\n'.format(
                     bwa_mem_aligning_dir, 
-                    ctrl_name[list_counter],
+                    chip_name[list_counter],
                     bwa_mem_aligning_dir, 
-                    ctrl_name[list_counter]))
-        
-                if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(ctrl_name) - 1):
+                    chip_name[list_counter]))
+
+                if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(chip_name) - 1):
                     bwa_mem_aligning_script.write('\nwait\n\n')
+                    
+            if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+                for list_counter in range(len(ctrl_name)):
+                    bwa_mem_aligning_script.write('samtools view -F 4 {}/{}.normaligned.bam -bS > {}/{}.normmapped.bam &\n'.format(
+                        bwa_mem_aligning_dir, 
+                        ctrl_name[list_counter],
+                        bwa_mem_aligning_dir, 
+                        ctrl_name[list_counter]))
+            
+                    if ((list_counter + 1) % int(cpu_count / 2)) == 0 or list_counter == (len(ctrl_name) - 1):
+                        bwa_mem_aligning_script.write('\nwait\n\n')
 
 
 
@@ -2481,23 +2498,24 @@ if start_from_bam == False:
             if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
                 bwa_mem_aligning_script.write('\nwait\n\n')
 
-    if norm_ref != 'none':
-        for list_counter in range(len(chip_name)):
-            bwa_mem_aligning_script.write('rm -r -f {}/{}.normaligned.bam &\n'.format(
-                bwa_mem_aligning_dir, 
-                chip_name[list_counter]))
-
-            if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-                bwa_mem_aligning_script.write('\nwait\n\n')
-                
-        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-            for list_counter in range(len(ctrl_name)):
+    if start_from_bam == False:
+        if norm_ref in ['sacCer3', 'eColiK12']:
+            for list_counter in range(len(chip_name)):
                 bwa_mem_aligning_script.write('rm -r -f {}/{}.normaligned.bam &\n'.format(
                     bwa_mem_aligning_dir, 
-                    ctrl_name[list_counter]))
-        
-                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                    chip_name[list_counter]))
+
+                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
                     bwa_mem_aligning_script.write('\nwait\n\n')
+                    
+            if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+                for list_counter in range(len(ctrl_name)):
+                    bwa_mem_aligning_script.write('rm -r -f {}/{}.normaligned.bam &\n'.format(
+                        bwa_mem_aligning_dir, 
+                        ctrl_name[list_counter]))
+            
+                    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                        bwa_mem_aligning_script.write('\nwait\n\n')
 
 
 
@@ -2521,25 +2539,26 @@ if start_from_bam == False:
             if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
                 bwa_mem_aligning_script.write('\nwait\n\n')
 
-    if norm_ref != 'none':
-        for list_counter in range(len(chip_name)):
-            bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normmapped.bam &\n'.format(
-                cpu_count, 
-                bwa_mem_aligning_dir, 
-                chip_name[list_counter]))
-
-            if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-                bwa_mem_aligning_script.write('\nwait\n\n')
-                
-        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-            for list_counter in range(len(ctrl_name)):
+    if start_from_bam == False:
+        if norm_ref in ['sacCer3', 'eColiK12']:
+            for list_counter in range(len(chip_name)):
                 bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normmapped.bam &\n'.format(
                     cpu_count, 
                     bwa_mem_aligning_dir, 
-                    ctrl_name[list_counter]))
-        
-                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                    chip_name[list_counter]))
+
+                if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
                     bwa_mem_aligning_script.write('\nwait\n\n')
+                    
+            if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+                for list_counter in range(len(ctrl_name)):
+                    bwa_mem_aligning_script.write('samtools index -@ {} {}/{}.normmapped.bam &\n'.format(
+                        cpu_count, 
+                        bwa_mem_aligning_dir, 
+                        ctrl_name[list_counter]))
+            
+                    if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                        bwa_mem_aligning_script.write('\nwait\n\n')
 
 bwa_mem_aligning_script.close() # Closing the script '06_bwa_mem_aligning_script.sh'. Flushing the write buffer
 
@@ -2656,7 +2675,7 @@ if start_from_bam == False:
     # Writing bash commands to sort each of the aligned sequence read files
     for list_counter in range(len(chip_name)):
         results_script.write('samtools sort -@ {} {}/{}.mapqfiltered.bam > {}/{}.bam\n\n'.format(
-            cpu_count, 
+            math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
             mapq_filtering_dir, 
             chip_name[list_counter], 
             results_dir, 
@@ -2675,7 +2694,7 @@ if start_from_bam == False:
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         for list_counter in range(len(ctrl_name)):
             results_script.write('samtools sort -@ {} {}/{}.mapqfiltered.bam > {}/{}.bam\n\n'.format(
-                cpu_count, 
+                math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
                 mapq_filtering_dir, 
                 ctrl_name[list_counter], 
                 results_dir, 
@@ -2699,7 +2718,7 @@ if start_from_bam == True:
         # Only do this if the input files and paths are not the output files and paths of this command
         if chip_r1_absolute_path[list_counter] != '{}/{}.bam'.format(results_dir, chip_name[list_counter]):
             results_script.write('samtools sort -@ {} {} > {}/{}.bam\n\n'.format(
-                cpu_count, 
+                math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
                 chip_r1_absolute_path[list_counter], 
                 results_dir, 
                 chip_name[list_counter]))
@@ -2710,7 +2729,7 @@ if start_from_bam == True:
             # Only do this if the input files and paths are not the output files and paths of this command
             if ctrl_r1_absolute_path[list_counter] != '{}/{}.bam'.format(results_dir, ctrl_name[list_counter]):
                 results_script.write('samtools sort -@ {} {} > {}/{}.bam\n\n'.format(
-                    cpu_count, 
+                    math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
                     ctrl_r1_absolute_path[list_counter], 
                     results_dir, 
                     ctrl_name[list_counter]))
@@ -2739,11 +2758,18 @@ if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
 
 
 bam_chip_list = ['{}/{}.bam'.format(results_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
-bam_chip_string = ' --bam ' + ' '.join(bam_chip_list)
+bam_chip_string = ' '.join(bam_chip_list)
 
-if norm_ref != 'none':
-    norm_bam_chip_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
-    norm_bam_chip_string = ' --norm_bam ' + ' '.join(norm_bam_chip_list)
+if start_from_bam == False:
+    if norm_ref in ['sacCer3', 'eColiK12']:
+        norm_bam_chip_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
+        norm_bam_chip_string = ' --norm_bam ' + ' '.join(norm_bam_chip_list)
+
+    elif norm_ref == 'greenlist':
+        norm_bam_chip_string = ' --norm_bam {}/{}_greenlist_size_factors.tsv'.format(bwa_mem_aligning_dir, dataset_name)
+
+    else:
+        norm_bam_chip_string = ' '
 
 else:
     norm_bam_chip_string = ' '
@@ -2752,10 +2778,14 @@ if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
     bam_ctrl_list = ['{}/{}.bam'.format(results_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
     bam_ctrl_string = ' ' + ' '.join(bam_ctrl_list)
 
-    if norm_ref != 'none':
-        norm_bam_ctrl_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
-        norm_bam_ctrl_string = ' ' + ' '.join(norm_bam_ctrl_list)
-
+    if start_from_bam == False:
+        if norm_ref in ['sacCer3', 'eColiK12']:
+            norm_bam_ctrl_list = ['{}/{}.normmapped.bam'.format(bwa_mem_aligning_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
+            norm_bam_ctrl_string = ' ' + ' '.join(norm_bam_ctrl_list)
+        
+        else:
+            norm_bam_ctrl_string = ' '
+    
     else:
         norm_bam_ctrl_string = ' '
 
@@ -2763,15 +2793,48 @@ else:
     bam_ctrl_string = ' '
     norm_bam_ctrl_string = ' '
 
+
 # Writing bash commands to generate bedgraph and bigwig coverage files out of all individual .bam files
-results_script.write('caras_reads_normalizer.py --thread {} {} --make_bam --make_bdg --make_bw {}{}{}{} --log_dir {}/logs\n\n'.format(
-    cpu_count,
-    reads_normalizer_arg,
-    bam_chip_string,
-    bam_ctrl_string,
-    norm_bam_chip_string,
-    norm_bam_ctrl_string,
-    results_dir))
+if norm_ref == 'greenlist':
+
+    results_script.write('multiBamSummary BED-file --BED {}/hg38_CUTnRUN_greenlist.v1.bed --smartLabels -e --centerReads -o {}/{}_greenlist_quantified_reads.npz -b {}{} --outRawCounts {}/{}_greenlist_output.tsv\n\n'.format(
+        caras_scripts_dir,
+        results_dir,
+        dataset_name,
+        bam_chip_string,
+        bam_ctrl_string,
+        results_dir,
+        dataset_name))
+    
+    results_script.write('cat {}/{}_greenlist_output.tsv'.format(results_dir, dataset_name))
+    results_script.write(r""" | tr -d "'#" | sed $'s/\t/_/1' | cut -f 1,3-""")
+    results_script.write(' > {}/{}_greenlist_quantified_reads.tsv\n\n'.format(results_dir, dataset_name))
+
+    results_script.write('Rscript --vanilla {}/get_sizeFactors.R {}/{}_greenlist_quantified_reads.tsv {}/{}_greenlist_size_factors.tsv\n\n'.format(
+        caras_scripts_dir,
+        results_dir,
+        dataset_name,
+        results_dir,
+        dataset_name))
+
+    results_script.write('caras_reads_normalizer.py --thread {} {} --norm value --make_bam --make_bdg --make_bw --bam {}{}{}{} --log_dir {}/logs\n\n'.format(
+        cpu_count,
+        reads_normalizer_arg,
+        bam_chip_string,
+        bam_ctrl_string,
+        norm_bam_chip_string,
+        norm_bam_ctrl_string,
+        results_dir))
+
+else:
+    results_script.write('caras_reads_normalizer.py --thread {} {} --make_bam --make_bdg --make_bw --bam {}{}{}{} --log_dir {}/logs\n\n'.format(
+        cpu_count,
+        reads_normalizer_arg,
+        bam_chip_string,
+        bam_ctrl_string,
+        norm_bam_chip_string,
+        norm_bam_ctrl_string,
+        results_dir))
 
 
 
@@ -3003,26 +3066,6 @@ if analysis_mode == 'bulk':
 
 
 
-    # Writing bash commands to generate a fingerprint plot .png file for all replicate-merged .bam files
-    results_script.write('plotFingerprint {} -p {} -b {}/{}_chip_merged.normalized.bam -l {}_chip_merged -o {}/fingerprint_plots/{}_merged.png &\n'.format(
-        plotfingerprint_arg,
-        cpu_count,
-        results_dir,
-        dataset_name,
-        dataset_name,
-        results_dir,
-        dataset_name))
-
-    # Writing bash commands to generate a fingerprint plot .svg file for all replicate-merged .bam files
-    results_script.write('plotFingerprint {} -p {} -b {}/{}_chip_merged.normalized.bam -l {}_chip_merged -o {}/fingerprint_plots/{}_merged.svg &\n'.format(
-        plotfingerprint_arg,
-        cpu_count,
-        results_dir,
-        dataset_name,
-        dataset_name,
-        results_dir,
-        dataset_name))
-
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         # Writing bash commands to generate a fingerprint plot .png file for all replicate-merged .bam files
         results_script.write('plotFingerprint {} -p {} -b {}/{}_chip_merged.normalized.bam {}/{}_ctrl_merged.normalized.bam -l {}_chip_merged {}_ctrl_merged -o {}/fingerprint_plots/{}_merged.png &\n'.format(
@@ -3049,7 +3092,28 @@ if analysis_mode == 'bulk':
             dataset_name,
             results_dir,
             dataset_name))
-            
+
+    else:
+        # Writing bash commands to generate a fingerprint plot .png file for all replicate-merged .bam files
+        results_script.write('plotFingerprint {} -p {} -b {}/{}_chip_merged.normalized.bam -l {}_chip_merged -o {}/fingerprint_plots/{}_merged.png &\n'.format(
+            plotfingerprint_arg,
+            cpu_count,
+            results_dir,
+            dataset_name,
+            dataset_name,
+            results_dir,
+            dataset_name))
+
+        # Writing bash commands to generate a fingerprint plot .svg file for all replicate-merged .bam files
+        results_script.write('plotFingerprint {} -p {} -b {}/{}_chip_merged.normalized.bam -l {}_chip_merged -o {}/fingerprint_plots/{}_merged.svg &\n'.format(
+            plotfingerprint_arg,
+            cpu_count,
+            results_dir,
+            dataset_name,
+            dataset_name,
+            results_dir,
+            dataset_name))
+    
     results_script.write('\nwait\n\n')
 
 
@@ -3058,7 +3122,7 @@ if analysis_mode == 'bulk':
 # The name-sorted individual .bam files are necessary as inputs for Genrich peak calling
 for list_counter in range(len(chip_name)):
     results_script.write('samtools sort -@ {} -n {}/{}.normalized.bam > {}/{}.namesorted.bam\n\n'.format(
-        cpu_count, 
+        math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
         results_dir, 
         chip_name[list_counter], 
         results_dir, 
@@ -3067,7 +3131,7 @@ for list_counter in range(len(chip_name)):
 if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
     for list_counter in range(len(ctrl_name)):
         results_script.write('samtools sort -@ {} -n {}/{}.normalized.bam > {}/{}.namesorted.bam\n\n'.format(
-            cpu_count, 
+            math.ceil(cpu_count/2) if read_mode == 'paired' else cpu_count, 
             results_dir, 
             ctrl_name[list_counter], 
             results_dir, 
@@ -3195,13 +3259,13 @@ if analysis_mode == 'bulk':
     else:
         macs2_ctrl_string = ''
 
-    macs2_peak_calling_script.write('macs2 callpeak{}{}{}{}{} --keep-dup all -g {} --name {}_MACS2 --outdir {} 1> {}/logs/{}.MACS2.out 2> {}/logs/{}.MACS2.err\n'.format(
+    macs2_peak_calling_script.write('macs2 callpeak{}{}{}{}{} --keep-dup all{} --name {}_MACS2 --outdir {} 1> {}/logs/{}.MACS2.out 2> {}/logs/{}.MACS2.err\n'.format(
         macs2_callpeak_arg,
         macs2_read_mode_arg,
         macs2_peak_type_arg,
         macs2_chip_string,
         macs2_ctrl_string, 
-        effective_genome_size, 
+        ' -g {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
         dataset_name,
         macs2_dir, 
         macs2_dir, 
@@ -3222,13 +3286,13 @@ if analysis_mode == 'single_cell':
         macs2_ctrl_list = [' ' for list_counter in range(len(chip_name))]
 
     for list_counter in range(len(chip_name)):
-        macs2_peak_calling_script.write('macs2 callpeak{}{}{}{}{} --keep-dup all -g {} --name {}_rep{}_MACS2 --outdir {} 1> {}/logs/{}_rep{}.MACS2.out 2> {}/logs/{}_rep{}.MACS2.err &\n'.format(
+        macs2_peak_calling_script.write('macs2 callpeak{}{}{}{}{} --keep-dup all{} --name {}_rep{}_MACS2 --outdir {} 1> {}/logs/{}_rep{}.MACS2.out 2> {}/logs/{}_rep{}.MACS2.err &\n'.format(
             macs2_callpeak_arg,
             macs2_read_mode_arg,
             macs2_peak_type_arg,
             macs2_chip_list[list_counter],
             macs2_ctrl_list[list_counter], 
-            effective_genome_size, 
+            ' -g {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
             dataset_name,
             (list_counter + 1),
             macs2_dir, 
@@ -3292,16 +3356,14 @@ if analysis_mode == 'bulk':
     else:
         gem_ctrl_string = ''
 
-    gem_peak_calling_script.write('java -jar {} {} --nrf --t {} --d {}/GEM/Read_Distribution_default.txt --g {}/GEM/{}.chrom.sizes --genome {}/GEM/{}_Chr_FASTA --s {} {} {} --f SAM --out {}/{}_GEM 1> {}/logs/{}.GEM.out 2> {}/logs/{}.GEM.err\n\n'.format(
+    gem_peak_calling_script.write('java -jar {} {} --nrf --t {} --d {}/GEM/Read_Distribution_default.txt --g {}/GEM/{}.chrom.sizes{} {} {} --f SAM --out {}/{}_GEM 1> {}/logs/{}.GEM.out 2> {}/logs/{}.GEM.err\n\n'.format(
         gem_full_path, 
         gem_arg, 
         math.ceil(cpu_count/2), 
         genome_dir, 
         genome_dir, 
-        genome_ref, 
-        genome_dir, 
-        genome_ref, 
-        effective_genome_size,
+        genome_ref,
+        ' --s {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
         gem_chip_string, 
         gem_ctrl_string, 
         gem_dir, 
@@ -3335,16 +3397,14 @@ if analysis_mode == 'single_cell':
         
 
     for list_counter in range(len(chip_name)):
-        gem_peak_calling_script.write('java -jar {} {} --nrf --t {} --d {}/GEM/Read_Distribution_default.txt --g {}/GEM/{}.chrom.sizes --genome {}/GEM/{}_Chr_FASTA --s {}{}{} --f SAM --out {}/{}_rep{}_GEM 1> {}/logs/{}_rep{}.GEM.out 2> {}/logs/{}_rep{}.GEM.err\n\n'.format(
+        gem_peak_calling_script.write('java -jar {} {} --nrf --t {} --d {}/GEM/Read_Distribution_default.txt --g {}/GEM/{}.chrom.sizes{}{}{} --f SAM --out {}/{}_rep{}_GEM 1> {}/logs/{}_rep{}.GEM.out 2> {}/logs/{}_rep{}.GEM.err\n\n'.format(
             gem_full_path,
             gem_arg,
             math.ceil(cpu_count/2),
             genome_dir,
             genome_dir,
             genome_ref,
-            genome_dir,
-            genome_ref,
-            effective_genome_size,
+            ' --s {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
             gem_chip_list[list_counter],
             gem_ctrl_list[list_counter],
             gem_dir,
@@ -3434,11 +3494,11 @@ if analysis_mode == 'bulk':
         
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        homer_peak_calling_script.write('findPeaks {}/chip_tag {}{} -tbp 0 -inputtbp 0 -gsize {} -o {}/{}_HOMER.peaks -i {}/ctrl_tag 1> {}/logs/{}.HOMER.out 2> {}/logs/{}.HOMER.err\n\n'.format(
+        homer_peak_calling_script.write('findPeaks {}/chip_tag {}{} -tbp 0 -inputtbp 0{} -o {}/{}_HOMER.peaks -i {}/ctrl_tag 1> {}/logs/{}.HOMER.out 2> {}/logs/{}.HOMER.err\n\n'.format(
             homer_dir, 
             homer_findPeaks_arg, 
             homer_peak_type_arg,
-            effective_genome_size,
+            ' -gsize {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
             homer_dir, 
             dataset_name, 
             homer_dir, 
@@ -3448,11 +3508,11 @@ if analysis_mode == 'bulk':
             dataset_name))
 
     else:
-        homer_peak_calling_script.write('findPeaks {}/chip_tag {}{} -tbp 0 -inputtbp 0 -gsize {} -o {}/{}_HOMER.peaks 1> {}/logs/{}.HOMER.out 2> {}/logs/{}.HOMER.err\n\n'.format(
+        homer_peak_calling_script.write('findPeaks {}/chip_tag {}{} -tbp 0 -inputtbp 0{} -o {}/{}_HOMER.peaks 1> {}/logs/{}.HOMER.out 2> {}/logs/{}.HOMER.err\n\n'.format(
             homer_dir, 
             homer_findPeaks_arg, 
             homer_peak_type_arg,
-            effective_genome_size,
+            ' -gsize {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
             homer_dir, 
             dataset_name,
             homer_dir, 
@@ -3474,35 +3534,35 @@ if analysis_mode == 'single_cell':
 
 
     for list_counter in range(len(chip_name)):
-        homer_peak_calling_script.write('makeTagDirectory {}/{}_tag{} -format sam{} -keepAll \n\n'.format(
+        homer_peak_calling_script.write('makeTagDirectory {}/{}_tag{} -format sam{} -keepAll &\n\n'.format(
             homer_dir, 
             chip_name[list_counter],
             homer_chip_list[list_counter],
             homer_read_mode_arg))
 
-        # if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
-        #     homer_peak_calling_script.write('\nwait\n\n')
+        if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(chip_name) - 1):
+            homer_peak_calling_script.write('\nwait\n\n')
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         for list_counter in range(len(chip_name)):
-            homer_peak_calling_script.write('makeTagDirectory {}/{}_tag{} -format sam{} -keepAll \n\n'.format(
+            homer_peak_calling_script.write('makeTagDirectory {}/{}_tag{} -format sam{} -keepAll &\n\n'.format(
                 homer_dir, 
                 ctrl_name[list_counter],
                 homer_ctrl_list[list_counter],
                 homer_read_mode_arg))
 
-            # if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
-            #     homer_peak_calling_script.write('\nwait\n\n')
+            if ((list_counter + 1) % cpu_count) == 0 or list_counter == (len(ctrl_name) - 1):
+                homer_peak_calling_script.write('\nwait\n\n')
 
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
         for list_counter in range(len(chip_name)):
-            homer_peak_calling_script.write('findPeaks {}/{}_tag {}{} -tbp 0 -inputtbp 0 -gsize {} -o {}/{}_rep{}_HOMER.peaks -i {}/{}_tag 1> {}/logs/{}_rep{}.HOMER.out 2> {}/logs/{}_rep{}.HOMER.err &\n'.format(
+            homer_peak_calling_script.write('findPeaks {}/{}_tag {}{} -tbp 0 -inputtbp 0{} -o {}/{}_rep{}_HOMER.peaks -i {}/{}_tag 1> {}/logs/{}_rep{}.HOMER.out 2> {}/logs/{}_rep{}.HOMER.err &\n'.format(
                 homer_dir, 
                 chip_name[list_counter],
                 homer_findPeaks_arg, 
                 homer_peak_type_arg,
-                effective_genome_size,
+                ' -gsize {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
                 homer_dir, 
                 dataset_name, 
                 (list_counter + 1),
@@ -3520,12 +3580,12 @@ if analysis_mode == 'single_cell':
                 
     else:
         for list_counter in range(len(chip_name)):
-            homer_peak_calling_script.write('findPeaks {}/{}_tag {}{} -tbp 0 -inputtbp 0 -gsize {} -o {}/{}_rep{}_HOMER.peaks 1> {}/logs/{}_rep{}.HOMER.out 2> {}/logs/{}_rep{}.HOMER.err &\n'.format(
+            homer_peak_calling_script.write('findPeaks {}/{}_tag {}{} -tbp 0 -inputtbp 0{} -o {}/{}_rep{}_HOMER.peaks 1> {}/logs/{}_rep{}.HOMER.out 2> {}/logs/{}_rep{}.HOMER.err &\n'.format(
                 homer_dir, 
                 chip_name[list_counter],
                 homer_findPeaks_arg, 
                 homer_peak_type_arg,
-                effective_genome_size,
+                ' -gsize {}'.format(effective_genome_size) if genome_ref in supported_genome else '', 
                 homer_dir, 
                 dataset_name,
                 (list_counter + 1),
@@ -3665,6 +3725,10 @@ seacr_peak_calling_script = open(seacr_peak_calling_script_name, 'w')
 seacr_peak_calling_script.write('#!/bin/bash\n\n')
 seacr_peak_calling_script.write('set -euxo pipefail\n\n')
 
+if sys.platform == "darwin":
+    seacr_peak_calling_script.write('export LC_CTYPE=C\n\n')
+    seacr_peak_calling_script.write('export LANG=C\n\n')
+
 if analysis_mode == 'single_cell':
     seacr_mode_arg = ' norm relaxed'
 
@@ -3773,20 +3837,36 @@ sicer2_peak_calling_script.write('cd {} \n\n'.format(sicer2_dir)) # Change to ou
 
 if analysis_mode == 'bulk':
 
-    sicer2_chip_string = ' -t ' + '{}/{}_chip_merged.normalized.bam'.format(results_dir, dataset_name)
+    sicer2_chip_string = ' -t ' + '{}/{}_chip_merged.normalized.bed'.format(sicer2_dir, dataset_name)
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        sicer2_ctrl_string = ' -c ' + '{}/{}_ctrl_merged.normalized.bam'.format(results_dir, dataset_name)
+        sicer2_ctrl_string = ' -c ' + '{}/{}_ctrl_merged.normalized.bed'.format(sicer2_dir, dataset_name)
     
     else:
         sicer2_ctrl_string = ''
     
 
+    sicer2_peak_calling_script.write('bedtools bamtobed -i {}/{}_chip_merged.normalized.bam > {}/{}_chip_merged.normalized.bed &\n'.format(
+        results_dir,
+        dataset_name,
+        sicer2_dir,
+        dataset_name))
+    
+    if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+        sicer2_peak_calling_script.write('bedtools bamtobed -i {}/{}_ctrl_merged.normalized.bam > {}/{}_ctrl_merged.normalized.bed &\n'.format(
+            results_dir,
+            dataset_name,
+            sicer2_dir,
+            dataset_name))
+    
+    sicer2_peak_calling_script.write('\nwait\n\n')
+
+
     sicer2_peak_calling_script.write('sicer{}{} -cpu {} -s {} {} -rt 1000000000 1> {}/logs/{}.SICER2.out 2> {}/logs/{}.SICER2.err\n\n'.format(
         sicer2_chip_string,
         sicer2_ctrl_string,
         cpu_count,
-        'mm10' if genome_ref == 'mm39' else genome_ref,
+        genome_ref,
         sicer2_arg,
         sicer2_dir, 
         dataset_name, 
@@ -3794,24 +3874,48 @@ if analysis_mode == 'bulk':
         dataset_name))
 
 
+    sicer2_peak_calling_script.write('rm -rf {}/{}_chip_merged.normalized.bed {}/{}_ctrl_merged.normalized.bed\n\n'.format(
+        sicer2_dir,
+        dataset_name,
+        sicer2_dir,
+        dataset_name))
+
+
 
 if analysis_mode == 'single_cell':
 
-    sicer2_chip_list = [' -t {}/{}.normalized.bam'.format(results_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
+    sicer2_chip_list = [' -t {}/{}.normalized.bed'.format(results_dir, chip_name[list_counter]) for list_counter in range(len(chip_name))]
 
     if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-        sicer2_ctrl_list = [' -c {}/{}.normalized.bam'.format(results_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
+        sicer2_ctrl_list = [' -c {}/{}.normalized.bed'.format(results_dir, ctrl_name[list_counter]) for list_counter in range(len(ctrl_name))]
 
     else:
         sicer2_ctrl_list = [' ' for list_counter in range(len(chip_name))]
 
 
     for list_counter in range(len(chip_name)):
+        
+        sicer2_peak_calling_script.write('bedtools bamtobed -i {}/{}.normalized.bam > {}/{}.normalized.bed &\n'.format(
+            results_dir,
+            chip_name[list_counter],
+            sicer2_dir,
+            chip_name[list_counter]))
+        
+        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
+            sicer2_peak_calling_script.write('bedtools bamtobed -i {}/{}.normalized.bam > {}/{}.normalized.bed &\n'.format(
+                results_dir,
+                ctrl_name[list_counter],
+                sicer2_dir,
+                ctrl_name[list_counter]))
+
+        sicer2_peak_calling_script.write('\nwait\n\n')
+
+
         sicer2_peak_calling_script.write('sicer{}{} -cpu {} -s {} {} -rt 1000000000 1> {}/logs/{}_rep{}.SICER2.out 2> {}/logs/{}_rep{}.SICER2.err\n\n'.format(
             sicer2_chip_list[list_counter],
             sicer2_ctrl_list[list_counter],
             cpu_count,
-            'mm10' if genome_ref == 'mm39' else genome_ref,
+            genome_ref,
             sicer2_arg,
             sicer2_dir, 
             dataset_name, 
@@ -3820,10 +3924,12 @@ if analysis_mode == 'single_cell':
             dataset_name,
             (list_counter + 1)))
 
-        sicer2_peak_calling_script.write('rm -rf {}.bed\n\n'.format(sicer2_chip_list[list_counter].lstrip(' -t ').rstrip('.bam')))
 
-        if ctrl_r1_sample_list or len(ctrl_r1_sample_list) != 0:
-            sicer2_peak_calling_script.write('rm -rf {}.bed\n\n'.format(sicer2_ctrl_list[list_counter].lstrip(' -c ').rstrip('.bam')))
+        sicer2_peak_calling_script.write('rm -rf {}/{}.normalized.bed {}/{}.normalized.bed\n\n'.format(
+            sicer2_dir,
+            chip_name[list_counter],
+            sicer2_dir,
+            ctrl_name[list_counter]))
 
 
 sicer2_peak_calling_script.write('cd {} \n\n'.format(current_dir))
@@ -4138,7 +4244,7 @@ if analysis_mode == 'bulk':
         homer_annotatePeaks_arg,
         peaks_processing_dir, 
         dataset_name, 
-        '{}/bwa/{}.fa -gtf {}/annotation/{}.refGene.gtf'.format(genome_dir, genome_ref, genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         ' -m {}'.format(motif_file_full_path) if motif_file_full_path != None else '', 
         peaks_processing_dir, 
         dataset_name, 
@@ -4394,7 +4500,7 @@ if analysis_mode == 'single_cell':
             peaks_processing_dir, 
             dataset_name, 
             (list_counter + 1),
-            '{}/bwa/{}.fa -gtf {}/annotation/{}.refGene.gtf'.format(genome_dir, genome_ref, genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+            genome_ref,
             ' -m {}'.format(motif_file_full_path) if motif_file_full_path != None else '', 
             peaks_processing_dir, 
             dataset_name, 
@@ -4754,7 +4860,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 1_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_1_overlap_script.write('findMotifsGenome.pl {}/1_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_1_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_1_overlap.err\n\n'.format(
         homer_motif_enrichment_1_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_1_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4780,7 +4886,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_1_overlap_script.write("find {} -name '1_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/1_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4810,7 +4916,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 2_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_2_overlap_script.write('findMotifsGenome.pl {}/2_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_2_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_2_overlap.err\n\n'.format(
         homer_motif_enrichment_2_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_2_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4836,7 +4942,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_2_overlap_script.write("find {} -name '2_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/2_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4866,7 +4972,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 3_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_3_overlap_script.write('findMotifsGenome.pl {}/3_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_3_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_3_overlap.err\n\n'.format(
         homer_motif_enrichment_3_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_3_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4892,7 +4998,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_3_overlap_script.write("find {} -name '3_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/3_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4922,7 +5028,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 4_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_4_overlap_script.write('findMotifsGenome.pl {}/4_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_4_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_4_overlap.err\n\n'.format(
         homer_motif_enrichment_4_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_4_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4948,7 +5054,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_4_overlap_script.write("find {} -name '4_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/4_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -4978,7 +5084,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 5_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_5_overlap_script.write('findMotifsGenome.pl {}/5_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_5_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_5_overlap.err\n\n'.format(
         homer_motif_enrichment_5_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_5_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -5005,7 +5111,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_5_overlap_script.write("find {} -name '5_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/5_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -5035,7 +5141,7 @@ if analysis_mode == 'bulk':
     # Bash commands to call HOMER findMotifsGenome.pl to perform motif enrichment analysis based on CaRAS 6_overlap peak set. One command, one run for every one replicate.
     homer_motif_enrichment_6_overlap_script.write('findMotifsGenome.pl {}/6_overlap_peaks.tsv {} {} -p {} {} 1> {}/logs/{}.HOMERmotifenrichment_6_overlap.out 2> {}/logs/{}.HOMERmotifenrichment_6_overlap.err\n\n'.format(
         homer_motif_enrichment_6_overlap_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_6_overlap_dir, 
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -5062,7 +5168,7 @@ if analysis_mode == 'single_cell':
     homer_motif_enrichment_6_overlap_script.write("find {} -name '6_overlap_peaks.tsv\' -type f -exec dirname {{}} \\; | xargs -L1 basename | parallel -j1 \"findMotifsGenome.pl {}/{{}}/6_overlap_peaks.tsv {} {}/{{}} -p {} {} 1> {}/logs/{}_{{}}.HOMERmotifenrichment.out 2> {}/logs/{}_{{}}.HOMERmotifenrichment.err\"\n\n".format(
         homer_motif_enrichment_dir,
         homer_motif_enrichment_dir,
-        '{}/bwa/{}.fa'.format(genome_dir, genome_ref) if genome_ref not in complete_genome else genome_ref,
+        genome_ref,
         homer_motif_enrichment_dir,
         cpu_count,
         homer_findMotifsGenome_arg,
@@ -5613,7 +5719,6 @@ master_script = open(master_script_name, 'w')
 
 master_script.write('#!/bin/bash\n\n')
 master_script.write('set -euxo pipefail\n\n')
-master_script.write('ulimit -n 2000\n\n')
 
 master_script.write('echo Creating a renamed copy of raw data in the output directory.\n')
 master_script.write('{}\n\n'.format(raw_data_script_name))
@@ -5633,7 +5738,7 @@ master_script.write('{}\n\n'.format(quality_trimming_script_name))
 master_script.write('echo Running quality check on the preprocessed sequencing reads.\n')
 master_script.write('{}\n\n'.format(preprocessed_reads_quality_control_script_name))
 
-master_script.write('echo Aligning the paired-ends sequenced reads to {} using bwa mem algorithm\n'.format(genome_ref))
+master_script.write('echo Aligning the {}-ends sequenced reads to {} using bwa mem algorithm\n'.format(read_mode, genome_ref))
 master_script.write('{}\n\n'.format(bwa_mem_aligning_script_name))
 
 master_script.write('echo Filtering the aligned reads according to MAPQ score\n')
@@ -5669,25 +5774,22 @@ master_script.write('{}\n\n'.format(peaks_merging_script_name))
 master_script.write('echo Concatenating, annotating, and calculating peak stats: peak caller overlaps, fold change, and motif hits\n')
 master_script.write('{}\n\n'.format(peaks_processing_script_name))
 
-
-
-if analysis_mode == 'bulk' and genome_ref in complete_genome:
     
-    if args.goann and not args.pathann:
-        master_script.write('echo Annotating every individual peak with all relevant GO terms from HOMER annotatePeaks -go feature\n')
-        master_script.write('{}\n\n'.format(go_annotation_script_name))
+if args.goann and not args.pathann:
+    master_script.write('echo Annotating every individual peak with all relevant GO terms from HOMER annotatePeaks -go feature\n')
+    master_script.write('{}\n\n'.format(go_annotation_script_name))
 
-    if args.pathann and not args.goann:
-        master_script.write('echo Annotating every individual peak with all relevant pathways, cooccurences, and interactions from HOMER annotatePeaks -go feature\n')
-        master_script.write('{}\n\n'.format(pathway_annotation_script_name))
+if args.pathann and not args.goann:
+    master_script.write('echo Annotating every individual peak with all relevant pathways, cooccurences, and interactions from HOMER annotatePeaks -go feature\n')
+    master_script.write('{}\n\n'.format(pathway_annotation_script_name))
 
-    # If the --goann and --pathann switchs are both toggled on, 
-    #   pathway annotation will be executed after the GO annotation, 
-    #   which makes the pathway annotation columns are located to the right 
-    #   of the GO annotation columns in the resulting table. 
-    if args.goann and args.pathann:
-        master_script.write('echo Annotating every individual peak with all relevant GO terms, pathways, cooccurences, and interactions from HOMER annotatePeaks -go feature\n')
-        master_script.write('{}\n\n'.format(go_pathway_annotation_script_name))
+# If the --goann and --pathann switchs are both toggled on, 
+#   pathway annotation will be executed after the GO annotation, 
+#   which makes the pathway annotation columns are located to the right 
+#   of the GO annotation columns in the resulting table. 
+if args.goann and args.pathann:
+    master_script.write('echo Annotating every individual peak with all relevant GO terms, pathways, cooccurences, and interactions from HOMER annotatePeaks -go feature\n')
+    master_script.write('{}\n\n'.format(go_pathway_annotation_script_name))
 
 
 if args.homer_motif: # Motif enrichment analyses are only performed on datasets with narrow peaks

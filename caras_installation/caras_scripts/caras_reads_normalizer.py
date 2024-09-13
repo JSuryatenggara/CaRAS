@@ -11,6 +11,7 @@ import sys
 import math
 import csv
 import numpy as np
+import pandas as pd
 from datetime import datetime
 
 subprocess.run('ulimit -n 2000', shell = True)
@@ -64,7 +65,7 @@ parser.add_argument('--thread',
 
 parser.add_argument('--norm', 
                     help = '<Optional> Normalize bedgraph signal based on the number of specific reads mapped to a spiked-in DNA genome. Default is no normalization.',
-                    choices = ['mapped', 'paired', 'properly_paired', 'none'],
+                    choices = ['mapped', 'paired', 'properly_paired', 'value', 'none'],
                     default = 'none')
 
 parser.add_argument('--bam', 
@@ -74,7 +75,7 @@ parser.add_argument('--bam',
 
 parser.add_argument('--norm_bam', 
                     nargs = '+', 
-                    help = '<Optional> bam file of reads aligned to spiked-in or carry-over DNA genome, to be used as signal normalizer for the output files.')
+                    help = '<Optional> bam file of reads aligned to spiked-in or carry-over DNA genome, to be used as signal normalizer for the output files. OR the path to greenlist.')
 
 parser.add_argument('--make_bam', 
                     help = '<Optional> Switch flag to generate bam file.', 
@@ -130,26 +131,29 @@ if any(bam_file_dir != bam_file_dir_list[0] for bam_file_dir in bam_file_dir_lis
     print('Please make sure all bam files are located in the same directory. Exiting program.')
     exit()
 
+norm_mode = args.norm
+
 if args.norm_bam:
-    norm_bam_file_list = [os.path.abspath(norm_bam_file) for norm_bam_file in args.norm_bam]
-    # norm_bam_file = os.path.abspath(args.norm_bam)
-    norm_bam_file_extension_list = [norm_bam_file.split('.')[-1] for norm_bam_file in norm_bam_file_list]
+    if norm_mode in ['mapped', 'paired', 'properly_paired']:
+        norm_bam_file_list = [os.path.abspath(norm_bam_file) for norm_bam_file in args.norm_bam]
+        norm_bam_file_extension_list = [norm_bam_file.split('.')[-1] for norm_bam_file in norm_bam_file_list]
 
-    if any(norm_bam_file_extension != 'bam' for norm_bam_file_extension in norm_bam_file_extension_list):
-        print('Please use only .bam file inputs. Exiting program.')
-        exit()
+        if any(norm_bam_file_extension != 'bam' for norm_bam_file_extension in norm_bam_file_extension_list):
+            print('Please use only file inputs with .bam extension. Exiting program.')
+            exit()
 
-    if len(bam_file_list) != len(norm_bam_file_list):
-        print('Number of bam files need to be the same as normalizer bam files. Exiting program')
-        exit()
+        if len(bam_file_list) != len(norm_bam_file_list):
+            print('Number of bam files need to be the same as normalizer bam files. Exiting program')
+            exit()
+
+    if norm_mode == 'value':
+        norm_bam_file = os.path.abspath(args.norm_bam[0])
 
 if args.log_dir:
     log_dir = args.log_dir
 
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-
-norm_mode = args.norm
 
 norm_scale_numerator = args.num
 
@@ -161,7 +165,39 @@ bdg_bin_size = args.bin
 
 
 
-if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam:
+if norm_mode == 'value' and len(bam_file_list) > 1 and args.norm_bam:
+
+    norm_scale_factor_list = []
+
+    dir_file_list = os.listdir(bam_file_dir_list[0])
+    
+    for dir_file in dir_file_list:
+       if '_greenlist_size_factors.tsv' in dir_file:
+           greenlist_file = dir_file
+           break
+    
+    greenlist_table_df = pd.read_csv('{}/{}'.format(bam_file_dir_list[0], greenlist_file), delimiter = '\t')
+    greenlist_table_df = greenlist_table_df.replace(np.nan, '')
+    
+    greenlist_table_norm_scale_factor_list = greenlist_table_df.iloc[:,-1].values.tolist()
+    greenlist_table_bam_file_list = greenlist_table_df.index.tolist()
+
+    for bam_file in bam_file_list:
+        for greenlist_table_bam_file_counter in range(len(greenlist_table_bam_file_list)):
+            if greenlist_table_bam_file_list[greenlist_table_bam_file_counter] in bam_file:
+                norm_scale_factor_list.append(greenlist_table_norm_scale_factor_list[greenlist_table_bam_file_counter])
+
+    norm_scale_factor_min = np.min(norm_scale_factor_list)
+
+    for norm_scale_factor_counter, norm_scale_factor in enumerate(norm_scale_factor_list):
+        norm_scale_factor_list[norm_scale_factor_counter] = norm_scale_factor / norm_scale_factor_min
+
+    norm_scale_numerator = 'NA'
+    norm_read_count_list = ['NA' for bam_file_counter in range(len(bam_file_list))]
+
+
+
+elif norm_mode in ['mapped', 'paired', 'properly_paired'] and len(bam_file_list) > 1 and args.norm_bam:
 
     norm_read_count_list = []
 
@@ -200,6 +236,7 @@ if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam:
         norm_read_count_second_max = norm_read_count_max
 
 
+
     if norm_scale_numerator == 0: # norm_scale_numerator = 0 is default mode (automatic), where the script will determine the numerator value based on mapped carry over DNA fragments.
         if norm_read_count_second_max != norm_read_count_max:
             norm_scale_multiplier = round(1 / ((norm_read_count_max / norm_read_count_second_max) - 1))
@@ -233,7 +270,6 @@ if norm_mode != 'none' and len(bam_file_list) > 1 and args.norm_bam:
 
         norm_scale_factor_list.append(norm_scale_factor)
 
-
 else:
     norm_scale_numerator = 'NA'
     norm_read_count_list = ['NA' for bam_file_counter in range(len(bam_file_list))]
@@ -242,23 +278,24 @@ else:
 
 
 print('bam_file_names: \n{}'.format(bam_file_name_list))
-print('norm_scale_numerators: \n{}'.format(norm_scale_numerator))
+print('norm_scale_numerator: \n{}'.format(norm_scale_numerator))
 print('norm_read_counts: \n{}'.format(norm_read_count_list))
 print('norm_scale_factors: \n{}'.format(norm_scale_factor_list))
 
 
 
-now = datetime.now()
-dt_string = now.strftime('%d_%m_%Y_%H_%M_%S')
+if norm_mode in ['mapped', 'paired', 'properly_paired']:
+    now = datetime.now()
+    dt_string = now.strftime('%d_%m_%Y_%H_%M_%S')
 
-with open('{}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string), 'w') as scaling_numbers_file:
-    scaling_numbers_file = csv.writer(scaling_numbers_file, delimiter = '\t')
-    scaling_numbers_file.writerow(['bam_file_name', 'norm_scale_numerator', 'norm_read_count', 'norm_scale_factor'])
+    with open('{}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string), 'w') as scaling_numbers_file:
+        scaling_numbers_file = csv.writer(scaling_numbers_file, delimiter = '\t')
+        scaling_numbers_file.writerow(['bam_file_name', 'norm_scale_numerator', 'norm_read_count', 'norm_scale_factor'])
 
-    for bam_file_counter in range(len(bam_file_list)):
-        scaling_numbers_file.writerow([bam_file_name_list[bam_file_counter], norm_scale_numerator, norm_read_count_list[bam_file_counter], norm_scale_factor_list[bam_file_counter]])
+        for bam_file_counter in range(len(bam_file_list)):
+            scaling_numbers_file.writerow([bam_file_name_list[bam_file_counter], norm_scale_numerator, norm_read_count_list[bam_file_counter], norm_scale_factor_list[bam_file_counter]])
 
-print('Scaling factors for all samples are recorded in: {}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string))
+    print('Scaling factors for all samples are recorded in: {}/scaling_numbers_{}.tsv'.format(bam_file_dir_list[0], dt_string))
 
 
 
@@ -280,7 +317,7 @@ for bam_file_counter in range(len(bam_file_list)):
             bedgraph_log_string = ''
 
         # Running bamCoverage to generate a bedgraph file, to be used later as input for SEACR
-        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bdg --skipNAs -of bedgraph --binSize {} --scaleFactor {} {}\n\n'.format(
+        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bdg --skipNAs -of bedgraph --binSize {} --scaleFactor {} {}'.format(
             cpu_count, 
             bam_file_list[bam_file_counter],
             bam_file_dir_list[bam_file_counter],
@@ -303,7 +340,7 @@ for bam_file_counter in range(len(bam_file_list)):
             bigwig_log_string = ''
 
         # Running bamCoverage to generate a bigwig file, to be used later for peak visualization
-        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bw -of bigwig --binSize {} --scaleFactor {} {}\n\n'.format(
+        subprocess.run('bamCoverage -p {} -b {} -o {}/{}.normalized.bw -of bigwig --binSize {} --scaleFactor {} {}'.format(
             cpu_count, 
             bam_file_list[bam_file_counter],
             bam_file_dir_list[bam_file_counter],

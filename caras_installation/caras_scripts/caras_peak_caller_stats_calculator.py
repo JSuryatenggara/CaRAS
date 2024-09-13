@@ -69,10 +69,10 @@ def combi_stats(input_tsv, output_tsv):
         motif_count_list = [int(peak_array_row[motif_count_column_number]) for peak_array_row in peak_array]
         
         # Generate a list that contains the average value of the ChIP read counts in all replicates 
-        chip_tag_count_list = [np.mean(np.array([peak_array_row[chip_tag_count_column_number] for chip_tag_count_column_number in chip_tag_count_column_number_list]).astype(np.float)) for peak_array_row in peak_array]
+        chip_tag_count_list = [np.mean(np.array([peak_array_row[chip_tag_count_column_number] for chip_tag_count_column_number in chip_tag_count_column_number_list]).astype(float)) for peak_array_row in peak_array]
 
         # Generate a list that contains the average value of the ChIP vs control fold change value in all replicates 
-        fold_change_list = [np.mean(np.array([peak_array_row[fold_change_column_number] for fold_change_column_number in fold_change_column_number_list]).astype(np.float)) for peak_array_row in peak_array]
+        fold_change_list = [np.mean(np.array([peak_array_row[fold_change_column_number] for fold_change_column_number in fold_change_column_number_list]).astype(float)) for peak_array_row in peak_array]
 
 
 

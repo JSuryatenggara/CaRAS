@@ -61,7 +61,6 @@ parser.add_argument('--chrsizedir',
 
 parser.add_argument('--ref', 
                     help = '<Required> Your sample organism reference genome build.', 
-                    choices = ['hg19', 'hg38', 'mm9', 'mm10', 'dm6', 'sacCer3'],
                     required = True)
 
 parser.add_argument('--filter', 

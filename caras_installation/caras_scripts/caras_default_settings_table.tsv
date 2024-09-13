@@ -10,9 +10,9 @@ plotfingerprint
 reads_normalizer	--norm properly_paired
 fastqc3	-q
 macs2_callpeak	
-gem	-Xmx100G --k_min 8 --k_max 12
+gem	-Xmx100G
 sicer2	-w 50 -g 100
-homer_findPeaks	-region
+homer_findPeaks	-region -F 2 -L 2
 genrich	-v
 seacr	
 homer_mergePeaks	

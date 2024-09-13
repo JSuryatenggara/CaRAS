@@ -62,7 +62,7 @@ def file_basename_parsing(file_relative_path_list):
 
     for absolute_path_element in absolute_path:
         current_extension = '.bam'
-        current_file_name = absolute_path_element.split('/')[-1].strip(current_extension)
+        current_file_name = removesuffix((absolute_path_element.split('/')[-1]), current_extension)
         original_name.append(current_file_name)
         original_extension.append(current_extension)
         
@@ -238,6 +238,14 @@ def annotation_simplifier_function(annotation):
     else:
         return annotation.split('(')[0]
 
+
+# Function to remove the exact subtring from the end of a string (mainly used for removing file extension)
+# INPUT     - string with substring, substring
+# OUTPUT    - string without substring
+def removesuffix(string, suffix):
+    if suffix and string.endswith(suffix):
+        return string[:-len(suffix)]
+    return string
 
 
 print('Setting argument parser')
@@ -521,27 +529,55 @@ if motif_number_column_exist == 0:
 
 
 # Determining all the columns wanted in the output table, and their orders
-peak_df = peak_df[['Peak ID', 
-                    'Chr', 
-                    'Start', 
-                    'End', 
-                    'Strand', 
-                    'Peak Caller Combination', 
-                    'Peak Caller Overlaps'
-                    ] + calculator_output_column_name + [
-                    'Number of Motifs', 
-                    'Annotation', 
-                    'Detailed Annotation', 
-                    'Distance to TSS', 
-                    'Nearest PromoterID', 
-                    'Entrez ID', 
-                    'Nearest Unigene', 
-                    'Nearest Refseq', 
-                    'Nearest Ensembl', 
-                    'Gene Name', 
-                    'Gene Alias', 
-                    'Gene Description', 
-                    'Gene Type']]
+try:
+    peak_df = peak_df[['Peak ID', 
+                        'Chr', 
+                        'Start', 
+                        'End', 
+                        'Strand', 
+                        'Peak Caller Combination', 
+                        'Peak Caller Overlaps'
+                        ] + calculator_output_column_name + [
+                        'Number of Motifs', 
+                        'Annotation', 
+                        'Detailed Annotation', 
+                        'Distance to TSS', 
+                        'Nearest PromoterID', 
+                        'Entrez ID', 
+                        'Nearest Unigene', 
+                        'Nearest Refseq', 
+                        'Nearest Ensembl', 
+                        'Gene Name', 
+                        'Gene Alias', 
+                        'Gene Description', 
+                        'Gene Type', 
+                        'CpG%', 
+                        'GC%'
+                        ]]
+
+except:
+    peak_df = peak_df[['Peak ID', 
+                        'Chr', 
+                        'Start', 
+                        'End', 
+                        'Strand', 
+                        'Peak Caller Combination', 
+                        'Peak Caller Overlaps'
+                        ] + calculator_output_column_name + [
+                        'Number of Motifs', 
+                        'Annotation', 
+                        'Detailed Annotation', 
+                        'Distance to TSS', 
+                        'Nearest PromoterID', 
+                        'Entrez ID', 
+                        'Nearest Unigene', 
+                        'Nearest Refseq', 
+                        'Nearest Ensembl', 
+                        'Gene Name', 
+                        'Gene Alias', 
+                        'Gene Description', 
+                        'Gene Type'
+                        ]]
 
 # Fix the bug where pandas automatically adds one decimal point to all the numbers in the 'Entrez ID' column
 # Some entries in the 'Entrez ID' column are NaN. When pandas parse column containing numbers 
@@ -591,7 +627,7 @@ if peak_type == 'narrow':
 
     # Save the .narrowPeak formatted peak list (the union peak set for IDR input) under .narrowPeak extension
     output_tsv_extension = '.' + output_tsv_full_path.split('.')[-1] if len(output_tsv_full_path.split('.')) > 1 else ''
-    output_narrowpeak_full_path = output_tsv_full_path.strip(output_tsv_extension) + '.narrowPeak'
+    output_narrowpeak_full_path = removesuffix(output_tsv_full_path, output_tsv_extension) + '.narrowPeak'
     print('Writing narrowPeak-formatted output for IDR calculation {}'.format(output_narrowpeak_full_path))
     narrowpeak_df.to_csv(output_narrowpeak_full_path, sep = '\t', index = False, header = None)
 
@@ -612,6 +648,6 @@ if peak_type == 'broad':
 
     # Save the .broadPeak formatted peak list (the union peak set for IDR input) under .broadPeak extension
     output_tsv_extension = '.' + output_tsv_full_path.split('.')[-1] if len(output_tsv_full_path.split('.')) > 1 else ''
-    output_broadpeak_full_path = output_tsv_full_path.strip(output_tsv_extension) + '.broadPeak'
+    output_broadpeak_full_path = removesuffix(output_tsv_full_path, output_tsv_extension) + '.broadPeak'
     print('Writing broadPeak-formatted output for IDR calculation {}'.format(output_broadpeak_full_path))
     broadpeak_df.to_csv(output_broadpeak_full_path, sep = '\t', index = False, header = None)
