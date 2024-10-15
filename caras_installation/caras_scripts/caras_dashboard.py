@@ -1354,7 +1354,7 @@ meme_motif_arg = tk.StringVar()
 
 # Insert full CaRAS logo
 image = Image.open(caras_logo_full_path)
-image = image.resize((232, 115), Image.ANTIALIAS)
+image = image.resize((232, 115), Image.LANCZOS)
 photo = ImageTk.PhotoImage(image)
 
 # Place the logo on the top left of the dashboard
