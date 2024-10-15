@@ -58,7 +58,7 @@ For advanced users, the installation instructions are as follows:
 
 1 - Download the caras_installation zip in our github repo and unzip in the folder of your choosing.
 
-    wget https://github.com/JSuryatenggara/CaRAS/raw/main/chipap_installation.zip
+    wget https://github.com/JSuryatenggara/CaRAS/raw/main/caras_installation.zip
 
 2 - Download the pre-generated, required genome files from our dropbox and unzip in the same folder as the CaRAS scripts – i.e.
 
